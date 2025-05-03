@@ -34,10 +34,9 @@ public class Nganh {
     @Column(name = "ten_nganh", nullable = false, length = 255)
     private String tenNganh;
 
-    // Liên kết nhiều-một với Khoa (mỗi ngành thuộc về một khoa)
-    @ManyToOne(fetch = FetchType.LAZY)
+
     @JoinColumn(name = "khoa_id", nullable = false)
-    private Khoa khoa;
+    private Integer khoaId;
 
     // Thời gian tạo, tự động gán khi tạo mới
     @CreationTimestamp
@@ -48,9 +47,4 @@ public class Nganh {
     @UpdateTimestamp
     @Column(name = "ngay_cap_nhat", nullable = false)
     private Timestamp ngayCapNhat;
-
-    // Danh sách các Lớp học thuộc Ngành này (OneToMany)
-    // Đã đổi tên biến từ 'lopHocs' thành 'danhSachLopHoc'
-    @OneToMany(mappedBy = "nganh", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
-    private Set<LopHoc> danhSachLopHoc;
 }

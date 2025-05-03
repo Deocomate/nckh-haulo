@@ -55,9 +55,4 @@ public class PhongBan {
     @UpdateTimestamp
     @Column(name = "ngay_cap_nhat", nullable = false)
     private Timestamp ngayCapNhat;
-
-    // Danh sách Cán bộ thuộc Phòng ban này (OneToMany)
-    // Đã đổi tên biến từ 'canBoPhongBans' thành 'danhSachCanBoPhongBan'
-    @OneToMany(mappedBy = "phongBan", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
-    private Set<CanBoPhongBan> danhSachCanBoPhongBan;
 }

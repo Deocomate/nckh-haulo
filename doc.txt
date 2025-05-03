@@ -1,0 +1,2508 @@
+
+
+/* ===== java/com/hau/websocket/config/CustomJwtDecoder.java ===== */
+package com.hau.websocket.config;
+
+import com.hau.websocket.dto.response.IntrospectResponse;
+import com.hau.websocket.service.TokenService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.JwtException;
+import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
+import org.springframework.stereotype.Component;
+
+import javax.crypto.spec.SecretKeySpec;
+import java.util.Objects;
+
+@Component
+@RequiredArgsConstructor
+public class CustomJwtDecoder implements JwtDecoder {
+    @Value("${jwt.signerKey}")
+    private String singerKey;
+
+    private final TokenService tokenService;
+
+    private NimbusJwtDecoder nimbusJwtDecoder = null;
+
+    @Override
+    public Jwt decode(String token) throws JwtException {
+        if (token == null || token.isEmpty()) {
+            throw new JwtException("Token không được cung cấp");
+        }
+
+        try {
+            IntrospectResponse response = tokenService.validateToken(token);
+
+            if (!response.isValid()) {
+                throw new JwtException("Token không hợp lệ");
+            }
+
+            if (Objects.isNull(nimbusJwtDecoder)) {
+                SecretKeySpec secretKeySpec = new SecretKeySpec(singerKey.getBytes(), "HS512");
+                nimbusJwtDecoder = NimbusJwtDecoder.withSecretKey(secretKeySpec)
+                        .macAlgorithm(MacAlgorithm.HS512)
+                        .build();
+            }
+
+            return nimbusJwtDecoder.decode(token);
+        } catch (Exception e) {
+            throw new JwtException(e.getMessage());
+        }
+    }
+}
+
+
+/* ===== java/com/hau/websocket/config/JwtAuthenticationEntryPoint.java ===== */
+package com.hau.websocket.config;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.hau.websocket.dto.response.ApiResponse;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.web.AuthenticationEntryPoint;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
+
+public class JwtAuthenticationEntryPoint implements AuthenticationEntryPoint {
+
+    @Override
+    public void commence(
+            HttpServletRequest request, HttpServletResponse response, AuthenticationException authException)
+            throws IOException {
+        response.setStatus(HttpStatus.UNAUTHORIZED.value());
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+
+        ApiResponse<?> apiResponse = ApiResponse.builder()
+                .status(HttpStatus.UNAUTHORIZED.value())
+                .message("Không có quyền truy cập: Token không hợp lệ hoặc hết hạn")
+                .timestamp(LocalDateTime.now())
+                .build();
+
+        ObjectMapper objectMapper = new ObjectMapper();
+        objectMapper.registerModule(new JavaTimeModule());
+        objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+
+        response.getWriter().write(objectMapper.writeValueAsString(apiResponse));
+        response.flushBuffer();
+    }
+}
+
+
+/* ===== java/com/hau/websocket/config/SecurityConfig.java ===== */
+package com.hau.websocket.config;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
+import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.web.cors.CorsConfiguration;
+
+@Configuration
+@EnableMethodSecurity
+@EnableWebSecurity
+@RequiredArgsConstructor
+public class SecurityConfig {
+
+    private final String[] publicPostEndpoint = {
+            "/users/register",
+            "/auth/**",
+            "/file/download/**",
+    };
+
+    private final CustomJwtDecoder customJwtDecoder;
+
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        http.cors(cors -> cors.configurationSource(request -> {
+            CorsConfiguration config = new CorsConfiguration();
+            config.addAllowedOrigin("*");
+            config.addAllowedMethod("*");
+            config.addAllowedHeader("*");
+            config.setAllowCredentials(false);
+            config.setMaxAge(3600L);
+            return config;
+        }));
+
+        http.authorizeHttpRequests(request -> request
+                .requestMatchers(publicPostEndpoint)
+                .permitAll()
+                .anyRequest()
+                .authenticated());
+
+        http.oauth2ResourceServer(oauth2 -> oauth2.jwt(jwtConfigurer -> jwtConfigurer
+                        .decoder(customJwtDecoder)
+                        .jwtAuthenticationConverter(jwtAuthenticationConverter()))
+                .authenticationEntryPoint(new JwtAuthenticationEntryPoint()));
+
+        http.csrf(AbstractHttpConfigurer::disable);
+        return http.build();
+    }
+
+    @Bean
+    JwtAuthenticationConverter jwtAuthenticationConverter() {
+        JwtGrantedAuthoritiesConverter jwtGrantedAuthoritiesConverter = new JwtGrantedAuthoritiesConverter();
+        jwtGrantedAuthoritiesConverter.setAuthorityPrefix("");
+        JwtAuthenticationConverter jwtAuthenticationConverter = new JwtAuthenticationConverter();
+        jwtAuthenticationConverter.setJwtGrantedAuthoritiesConverter(jwtGrantedAuthoritiesConverter);
+
+        return jwtAuthenticationConverter;
+    }
+
+    @Bean
+    PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder(10);
+    }
+}
+
+/* ===== java/com/hau/websocket/controller/AuthenticationController.java ===== */
+package com.hau.websocket.controller;
+
+import com.hau.websocket.dto.request.*;
+import com.hau.websocket.dto.response.ApiResponse;
+import com.hau.websocket.dto.response.AuthenticationResponse;
+import com.hau.websocket.dto.response.IntrospectResponse;
+import com.hau.websocket.service.AuthenticationService;
+import com.hau.websocket.service.TokenService;
+import com.nimbusds.jose.JOSEException;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.text.ParseException;
+
+@RestController
+@RequiredArgsConstructor
+@RequestMapping("/auth")
+public class AuthenticationController {
+    private final AuthenticationService authenticationService;
+    private final TokenService tokenService;
+
+    @PostMapping("/login")
+    public ResponseEntity<ApiResponse<AuthenticationResponse>> authenticate(
+            @RequestBody @Valid AuthenticationRequest authenticationRequest) {
+        ApiResponse<AuthenticationResponse> apiResponse = authenticationService.authenticate(authenticationRequest);
+        return new ResponseEntity<>(apiResponse, HttpStatus.OK);
+    }
+
+    @PostMapping("/logout")
+    public ResponseEntity<ApiResponse<Void>> logout(@RequestBody LogoutRequest logoutRequest) throws ParseException {
+        ApiResponse<Void> apiResponse = authenticationService.logout(logoutRequest);
+        return new ResponseEntity<>(apiResponse, HttpStatus.OK);
+    }
+
+    @PostMapping("/refresh-token")
+    public ResponseEntity<ApiResponse<AuthenticationResponse>> refreshToken(
+            @RequestBody RefreshTokenRequest refreshTokenRequest) throws ParseException, JOSEException {
+        ApiResponse<AuthenticationResponse> apiResponse = tokenService.refreshToken(refreshTokenRequest);
+        return new ResponseEntity<>(apiResponse, HttpStatus.OK);
+    }
+
+    @PostMapping("/introspect")
+    public ResponseEntity<ApiResponse<IntrospectResponse>> introspect(@RequestBody IntrospectRequest request) {
+        ApiResponse<IntrospectResponse> apiResponse = authenticationService.introspect(request);
+        return new ResponseEntity<>(apiResponse, HttpStatus.OK);
+    }
+}
+
+
+/* ===== java/com/hau/websocket/controller/FileController.java ===== */
+package com.hau.websocket.controller;
+
+import com.hau.websocket.service.FileService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.core.io.Resource;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.io.IOException;
+
+@RestController
+@RequiredArgsConstructor
+@RequestMapping("/file")
+public class FileController {
+    private final FileService fileService;
+
+    @GetMapping("/download/{fileName}")
+    public ResponseEntity<Resource> downloadFile(@PathVariable String fileName) throws IOException {
+        var fileData = fileService.downloadFile(fileName);
+        var fileManagement = fileService.getFileManagement(fileName);
+
+        String originalFileName = fileManagement.getId();
+        String contentType = fileData.contentType();
+        if (contentType == null) contentType = "application/octet-stream";
+
+        // Các loại content type cho phép hiển thị trên browser
+        boolean isInlineDisplay =
+                contentType.startsWith("image/")
+                        || contentType.startsWith("video/");
+
+        ResponseEntity.BodyBuilder responseBuilder = ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_TYPE, contentType);
+
+        if (!isInlineDisplay) {
+            // Các loại file khác sẽ ép tải về
+            responseBuilder.header(HttpHeaders.CONTENT_DISPOSITION,
+                    "attachment; filename=\"" + originalFileName + "\"");
+        }
+        return responseBuilder.body(fileData.resource());
+    }
+
+    @DeleteMapping("/{fileName}")
+    public void deleteFile(@PathVariable String fileName) throws IOException {
+        fileService.deleteFile(fileName);
+    }
+}
+
+
+/* ===== java/com/hau/websocket/controller/NguoiDungController.java ===== */
+package com.hau.websocket.controller;
+
+import com.hau.websocket.dto.request.ChangePasswordRequest;
+import com.hau.websocket.dto.request.NguoiDungCreateRequest;
+import com.hau.websocket.dto.request.NguoiDungUpdateRequest;
+import com.hau.websocket.dto.response.ApiResponse;
+import com.hau.websocket.dto.response.NguoiDungResponse;
+import com.hau.websocket.dto.response.PageResponse;
+import com.hau.websocket.service.NguoiDungService;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.IOException;
+
+@RestController
+@RequiredArgsConstructor
+@RequestMapping("/users")
+public class NguoiDungController {
+    private final NguoiDungService nguoiDungService;
+
+    @PostMapping("/register")
+    public ResponseEntity<ApiResponse<NguoiDungResponse>> createUser(
+            @Valid @RequestBody NguoiDungCreateRequest userCreateRequest) {
+        ApiResponse<NguoiDungResponse> userResponse = nguoiDungService.createUser(userCreateRequest);
+        return new ResponseEntity<>(userResponse, HttpStatus.CREATED);
+    }
+
+    @GetMapping("/info")
+    public ResponseEntity<ApiResponse<NguoiDungResponse>> myInfo() {
+        ApiResponse<NguoiDungResponse> userResponse = nguoiDungService.myInfo();
+        return new ResponseEntity<>(userResponse, HttpStatus.OK);
+    }
+
+    @PutMapping("/{userId}")
+    public ResponseEntity<ApiResponse<NguoiDungResponse>> updateUser(
+            @PathVariable Integer userId, @Valid @RequestBody NguoiDungUpdateRequest userUpdateRequest) {
+        ApiResponse<NguoiDungResponse> userResponse = nguoiDungService.updateUser(userId, userUpdateRequest);
+        return new ResponseEntity<>(userResponse, HttpStatus.OK);
+    }
+
+
+    @PatchMapping("/password")
+    public ResponseEntity<ApiResponse<NguoiDungResponse>> updatePassword( @RequestBody @Valid ChangePasswordRequest changePasswordRequest) {
+        ApiResponse<NguoiDungResponse> userResponse = nguoiDungService.changePassword(changePasswordRequest);
+        return new ResponseEntity<>(userResponse, HttpStatus.OK);
+    }
+
+    @GetMapping
+    public ResponseEntity<ApiResponse<PageResponse<NguoiDungResponse>>> getAllUsers(
+            @RequestParam(required = false, defaultValue = "1") int pageIndex,
+            @RequestParam(required = false, defaultValue = "10") int pageSize
+    ) {
+        ApiResponse<PageResponse<NguoiDungResponse>> userPage = nguoiDungService.getAllUsers(pageIndex, pageSize);
+        return new ResponseEntity<>(userPage, HttpStatus.OK);
+    }
+
+    @PutMapping("/profile-image")
+    public ResponseEntity<ApiResponse<NguoiDungResponse>> updateUserProfileImage(
+            @RequestParam("profileImage") MultipartFile profileImage) throws IOException {
+        ApiResponse<NguoiDungResponse> userResponse = nguoiDungService.updateUserProfileImage(profileImage);
+        return new ResponseEntity<>(userResponse, HttpStatus.OK);
+    }
+}
+
+
+/* ===== java/com/hau/websocket/controller/TinNhanController.java ===== */
+package com.hau.websocket.controller;
+
+import com.hau.websocket.dto.request.TinNhanCreateRequest;
+import com.hau.websocket.dto.response.ApiResponse;
+import com.hau.websocket.dto.response.PageResponse;
+import com.hau.websocket.dto.response.TinNhanResponse;
+import com.hau.websocket.service.TinNhanService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.IOException;
+
+@RestController
+@RequiredArgsConstructor
+@RequestMapping("/messages")
+public class TinNhanController {
+    private final TinNhanService tinNhanService;
+
+    @PostMapping
+    public void createMessage(
+            @RequestPart("tinNhan") TinNhanCreateRequest tinNhanCreateRequest,
+            @RequestPart(value = "file", required = false) MultipartFile multipartFile
+    ) throws IOException {
+        tinNhanService.crateTinNhan(tinNhanCreateRequest, multipartFile);
+    }
+
+    @GetMapping("/{cuocTroChuyenId}")
+    public ResponseEntity<ApiResponse<PageResponse<TinNhanResponse>>> getAllMessagesByCuocTroChuyenId(
+            @PathVariable Integer cuocTroChuyenId,
+            @RequestParam(required = false, defaultValue = "1") int pageIndex,
+            @RequestParam(required = false, defaultValue = "10") int pageSize
+    ) {
+        ApiResponse<PageResponse<TinNhanResponse>> apiResponse = tinNhanService.getTinNhanByCuocTroChuyenId(pageIndex, pageSize, cuocTroChuyenId);
+        return new ResponseEntity<>(apiResponse, HttpStatus.OK);
+    }
+
+    @DeleteMapping("/{tinNhanId}")
+    public void deleteMessage(@PathVariable Integer tinNhanId) {
+        tinNhanService.deleteTinNhan(tinNhanId);
+    }
+
+    @DeleteMapping("/conversation/{cuocTroChuyenId}")
+    public void deleteMessagesByCuocTroChuyenId(@PathVariable Integer cuocTroChuyenId) {
+        tinNhanService.deleteAllTinNhan(cuocTroChuyenId);
+    }
+}
+
+
+/* ===== java/com/hau/websocket/dto/FileData.java ===== */
+package com.hau.websocket.dto;
+
+import org.springframework.core.io.Resource;
+
+public record FileData(String contentType, Resource resource) {
+
+}
+
+
+/* ===== java/com/hau/websocket/dto/request/AuthenticationRequest.java ===== */
+package com.hau.websocket.dto.request;
+
+import jakarta.validation.constraints.NotBlank;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Builder
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class AuthenticationRequest {
+    @NotBlank(message = "Tên đăng nhập không được để trống")
+    private String maDangNhap;
+
+    @NotBlank(message = "Mật khẩu không được để trống")
+    private String matKhau;
+}
+
+
+/* ===== java/com/hau/websocket/dto/request/ChangePasswordRequest.java ===== */
+package com.hau.websocket.dto.request;
+
+import jakarta.validation.constraints.NotBlank;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class ChangePasswordRequest {
+    @NotBlank(message = "Mật khẩu cũ không được để trống")
+    private String matKhauCu;
+
+    @NotBlank(message = "Mật khẩu mới không được để trống")
+    private String matKhauMoi;
+}
+
+
+/* ===== java/com/hau/websocket/dto/request/IntrospectRequest.java ===== */
+package com.hau.websocket.dto.request;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class IntrospectRequest {
+    private String token;
+}
+
+
+/* ===== java/com/hau/websocket/dto/request/LogoutRequest.java ===== */
+package com.hau.websocket.dto.request;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class LogoutRequest {
+    private String token;
+}
+
+
+/* ===== java/com/hau/websocket/dto/request/NguoiDungCreateRequest.java ===== */
+package com.hau.websocket.dto.request;
+
+import com.hau.websocket.entity.LoaiNguoiDung;
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+import java.util.Set;
+
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class NguoiDungCreateRequest {
+    @Pattern(regexp = "^[a-z0-9]+$", message = "Tài khoản chỉ được chứa chữ cái thường và không có ký tự đặc biệt")
+    private String maDangNhap;
+    @Size(min = 6, message = "Password phải có ít nhất 6 ký tự")
+    private String matKhau;
+    private String hoTen;
+    @Email(message = "Email không đúng định dạng")
+    private String email;
+    @Pattern(regexp = "^[0-9]{10}$", message = "Số điện thoại phải có 10 chữ số")
+    private String soDienThoai;
+    private LoaiNguoiDung loaiTaiKhoan;
+    private String diaChi;
+    private String anhDaiDien;
+}
+
+
+/* ===== java/com/hau/websocket/dto/request/NguoiDungUpdateRequest.java ===== */
+package com.hau.websocket.dto.request;
+
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+import java.util.Set;
+
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class NguoiDungUpdateRequest {
+    @Size(min = 6, message = "Password phải có ít nhất 6 ký tự")
+    private String matKhau;
+    private String hoTen;
+    @Email(message = "Email không đúng định dạng")
+    private String email;
+    @Pattern(regexp = "^[0-9]{10}$", message = "Số điện thoại phải có 10 chữ số")
+    private String soDienThoai;
+    private String diaChi;
+    private String anhDaiDien;
+}
+
+
+/* ===== java/com/hau/websocket/dto/request/RefreshTokenRequest.java ===== */
+package com.hau.websocket.dto.request;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class RefreshTokenRequest {
+    private String token;
+}
+
+
+/* ===== java/com/hau/websocket/dto/request/TinNhanCreateRequest.java ===== */
+package com.hau.websocket.dto.request;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class TinNhanCreateRequest {
+    private Integer nguoiNhanId;
+    private String noiDung;
+}
+
+
+/* ===== java/com/hau/websocket/dto/response/ApiResponse.java ===== */
+package com.hau.websocket.dto.response;
+
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+import java.time.LocalDateTime;
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class ApiResponse<T> {
+    private int status;
+    private String message;
+    private T result;
+    private LocalDateTime timestamp;
+}
+
+
+/* ===== java/com/hau/websocket/dto/response/AuthenticationResponse.java ===== */
+package com.hau.websocket.dto.response;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Builder
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class AuthenticationResponse {
+    private boolean authenticated;
+    private String token;
+}
+
+
+/* ===== java/com/hau/websocket/dto/response/ErrorsResponse.java ===== */
+package com.hau.websocket.dto.response;
+
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+import java.time.LocalDateTime;
+
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class ErrorsResponse {
+    private int status;
+    private String message;
+    private Object error;
+    private LocalDateTime timestamp;
+}
+
+
+/* ===== java/com/hau/websocket/dto/response/FileInfo.java ===== */
+package com.hau.websocket.dto.response;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class FileInfo {
+    private String fileName;
+    private String contentType;
+    private long size;
+    private String md5Checksum;
+    private String filePath;
+    private String fileUrl;
+}
+
+
+/* ===== java/com/hau/websocket/dto/response/FileResponse.java ===== */
+package com.hau.websocket.dto.response;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class FileResponse {
+    private String originalFileName;
+    private String url;
+    private String contentType;
+}
+
+
+/* ===== java/com/hau/websocket/dto/response/IntrospectResponse.java ===== */
+package com.hau.websocket.dto.response;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class IntrospectResponse {
+    private boolean valid;
+    private Integer id;
+}
+
+
+/* ===== java/com/hau/websocket/dto/response/NguoiDungResponse.java ===== */
+package com.hau.websocket.dto.response;
+
+import com.hau.websocket.entity.LoaiNguoiDung;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+import java.util.Set;
+
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class NguoiDungResponse {
+    private Integer id;
+    private String maDangNhap;
+    private String matKhau;
+    private String hoTen;
+    private String email;
+    private String soDienThoai;
+    private LoaiNguoiDung loaiTaiKhoan;
+    private String diaChi;
+    private String anhDaiDien;
+}
+
+
+/* ===== java/com/hau/websocket/dto/response/PageResponse.java ===== */
+package com.hau.websocket.dto.response;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+import java.util.Collections;
+import java.util.List;
+
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class PageResponse<T> {
+    private int currentPage;
+    private int totalPages;
+    private long totalElements;
+    private int pageSize;
+
+    @Builder.Default
+    private List<T> data = Collections.emptyList();
+}
+
+
+/* ===== java/com/hau/websocket/dto/response/TinNhanResponse.java ===== */
+package com.hau.websocket.dto.response;
+
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+import java.time.LocalDateTime;
+
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class TinNhanResponse {
+    private Integer id;
+    private Integer cuocTroChuyenId;
+    private Integer nguoiGuiId;
+    private Integer nguoiNhanId;
+    private String noiDung;
+    private String dinhKemUrl;
+    private String dinhKemTenGoc;
+    private String dinhKemLoai;
+    private LocalDateTime thoiGianGui;
+}
+
+
+/* ===== java/com/hau/websocket/entity/CanBoPhongBan.java ===== */
+package com.hau.websocket.entity;
+
+import jakarta.persistence.*;
+import lombok.*;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
+
+import java.sql.Timestamp;
+
+@Builder
+@Setter
+@Getter
+@NoArgsConstructor
+@AllArgsConstructor
+@Entity
+@Table(name = "can_bo_phong_ban")
+public class CanBoPhongBan {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Integer id;
+
+
+    @JoinColumn(name = "nguoi_dung_id", unique = true, nullable = false)
+    private Integer nguoiDungId;
+
+    // Mã cán bộ, là duy nhất và không null
+    @Column(name = "ma_can_bo", unique = true, nullable = false, length = 50)
+    private String maCanBo;
+
+
+    @JoinColumn(name = "phong_ban_id", nullable = false)
+    private Integer phongBanId;
+
+    // Vai trò của nhân viên trong phòng ban
+    @Column(name = "vai_tro_nhan_vien", length = 100)
+    private String vaiTroNhanVien;
+
+    // Cờ xác định có phải là đầu mối liên lạc không (mặc định là false)
+    @Column(name = "la_dau_moi_lien_lac", nullable = false, columnDefinition = "BOOLEAN DEFAULT false")
+    private boolean laDauMoiLienLac = false;
+
+    // Thời gian tạo, tự động gán khi tạo mới
+    @CreationTimestamp
+    @Column(name = "ngay_tao", nullable = false, updatable = false)
+    private Timestamp ngayTao;
+
+    // Thời gian cập nhật, tự động gán khi cập nhật
+    @UpdateTimestamp
+    @Column(name = "ngay_cap_nhat", nullable = false)
+    private Timestamp ngayCapNhat;
+}
+
+
+/* ===== java/com/hau/websocket/entity/FileManagement.java ===== */
+package com.hau.websocket.entity;
+
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+import lombok.*;
+
+import java.time.LocalDateTime;
+
+@Getter
+@Setter
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+@Table(name = "file_management")
+@Entity
+public class FileManagement {
+    @Id
+    private String id;
+    private String ownerId;
+    private String contentType;
+    private long size;
+    private String md5Checksum;
+    private String filePath;
+
+    private LocalDateTime createdAt;
+}
+
+
+/* ===== java/com/hau/websocket/entity/InvalidatedToken.java ===== */
+package com.hau.websocket.entity;
+
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+import lombok.*;
+
+import java.util.Date;
+
+@Builder
+@Setter
+@Getter
+@NoArgsConstructor
+@AllArgsConstructor
+@Entity
+@Table(name = "invalidated_token")
+public class InvalidatedToken {
+    @Id
+    private String id;
+
+    private Date expiryDate;
+}
+
+
+/* ===== java/com/hau/websocket/entity/Khoa.java ===== */
+// --- Khoa.java ---
+package com.hau.websocket.entity;
+
+import jakarta.persistence.*;
+import lombok.*;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
+
+import java.sql.Timestamp;
+import java.util.Set;
+
+/**
+ * Entity đại diện cho Khoa.
+ * Có mối quan hệ OneToMany với Nganh.
+ */
+@Builder
+@Setter
+@Getter
+@NoArgsConstructor
+@AllArgsConstructor
+@Entity
+@Table(name = "khoa")
+public class Khoa {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Integer id;
+
+    // Mã khoa, là duy nhất và không null
+    @Column(name = "ma_khoa", unique = true, nullable = false, length = 50)
+    private String maKhoa;
+
+    // Tên khoa, không null
+    @Column(name = "ten_khoa", nullable = false, length = 255)
+    private String tenKhoa;
+
+    // Thời gian tạo, tự động gán khi tạo mới
+    @CreationTimestamp
+    @Column(name = "ngay_tao", nullable = false, updatable = false)
+    private Timestamp ngayTao;
+
+    // Thời gian cập nhật, tự động gán khi cập nhật
+    @UpdateTimestamp
+    @Column(name = "ngay_cap_nhat", nullable = false)
+    private Timestamp ngayCapNhat;
+}
+
+/* ===== java/com/hau/websocket/entity/LoaiNguoiDung.java ===== */
+// --- LoaiNguoiDung.java ---
+package com.hau.websocket.entity;
+
+/**
+ * Enum định nghĩa các loại người dùng trong hệ thống.
+ */
+public enum LoaiNguoiDung {
+    SINH_VIEN,      // Sinh viên
+    CAN_BO_LOP,     // Cán bộ lớp
+    CAN_BO_PHONG_BAN // Cán bộ phòng ban
+}
+
+/* ===== java/com/hau/websocket/entity/LopHoc.java ===== */
+// --- LopHoc.java ---
+package com.hau.websocket.entity;
+
+import jakarta.persistence.*;
+import lombok.*;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
+
+import java.sql.Timestamp;
+import java.util.Set;
+
+/**
+ * Entity đại diện cho Lớp học.
+ * Có mối quan hệ ManyToOne với Nganh và OneToMany với SinhVien, TinNhanLop.
+ */
+@Builder
+@Setter
+@Getter
+@NoArgsConstructor
+@AllArgsConstructor
+@Entity
+@Table(name = "lop_hoc")
+public class LopHoc {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Integer id;
+
+    // Mã lớp, là duy nhất và không null
+    @Column(name = "ma_lop", unique = true, nullable = false, length = 50)
+    private String maLop;
+
+    // Tên lớp, không null
+    @Column(name = "ten_lop", nullable = false, length = 255)
+    private String tenLop;
+
+    // Niên khóa của lớp (ví dụ: 2021-2025)
+    @Column(name = "nien_khoa", length = 50)
+    private String nienKhoa;
+
+    // Liên kết nhiều-một với Nganh (mỗi lớp thuộc về một ngành)
+    @JoinColumn(name = "nganh_id", nullable = false)
+    private Integer nganhId;
+
+    // Thời gian tạo, tự động gán khi tạo mới
+    @CreationTimestamp
+    @Column(name = "ngay_tao", nullable = false, updatable = false)
+    private Timestamp ngayTao;
+
+    // Thời gian cập nhật, tự động gán khi cập nhật
+    @UpdateTimestamp
+    @Column(name = "ngay_cap_nhat", nullable = false)
+    private Timestamp ngayCapNhat;
+}
+
+/* ===== java/com/hau/websocket/entity/Nganh.java ===== */
+// --- Nganh.java ---
+package com.hau.websocket.entity;
+
+import jakarta.persistence.*;
+import lombok.*;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
+
+import java.sql.Timestamp;
+import java.util.Set;
+
+/**
+ * Entity đại diện cho Ngành học.
+ * Có mối quan hệ ManyToOne với Khoa và OneToMany với LopHoc.
+ */
+@Builder
+@Setter
+@Getter
+@NoArgsConstructor
+@AllArgsConstructor
+@Entity
+@Table(name = "nganh")
+public class Nganh {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Integer id;
+
+    // Mã ngành, là duy nhất và không null
+    @Column(name = "ma_nganh", unique = true, nullable = false, length = 50)
+    private String maNganh;
+
+    // Tên ngành, không null
+    @Column(name = "ten_nganh", nullable = false, length = 255)
+    private String tenNganh;
+
+
+    @JoinColumn(name = "khoa_id", nullable = false)
+    private Integer khoaId;
+
+    // Thời gian tạo, tự động gán khi tạo mới
+    @CreationTimestamp
+    @Column(name = "ngay_tao", nullable = false, updatable = false)
+    private Timestamp ngayTao;
+
+    // Thời gian cập nhật, tự động gán khi cập nhật
+    @UpdateTimestamp
+    @Column(name = "ngay_cap_nhat", nullable = false)
+    private Timestamp ngayCapNhat;
+}
+
+/* ===== java/com/hau/websocket/entity/NguoiDung.java ===== */
+// --- NguoiDung.java ---
+package com.hau.websocket.entity;
+
+import jakarta.persistence.*;
+import lombok.*;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
+
+import java.sql.Timestamp;
+import java.util.Set;
+
+/**
+ * Entity đại diện cho Người dùng chung trong hệ thống.
+ * Bao gồm thông tin cơ bản và các mối quan hệ với các vai trò cụ thể (SinhVien, CanBoPhongBan)
+ * và các hoạt động (tạo nhóm, tham gia nhóm, gửi/nhận tin nhắn).
+ */
+@Setter
+@Getter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+@Entity
+@Table(name = "nguoi_dung")
+public class NguoiDung {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Integer id;
+
+    // Mã đăng nhập (MSV, Mã Cán bộ, Username), là duy nhất và không null
+    @Column(name = "ma_dang_nhap", unique = true, nullable = false, length = 100)
+    private String maDangNhap;
+
+    // Mật khẩu đã được mã hóa
+    @Column(name = "mat_khau", nullable = false, length = 255)
+    private String matKhau;
+
+    // Họ tên người dùng, không null
+    @Column(name = "ho_ten", nullable = false, length = 255)
+    private String hoTen;
+
+    // Email, là duy nhất
+    @Column(name = "email", unique = true, length = 255)
+    private String email;
+
+    // Số điện thoại
+    @Column(name = "so_dien_thoai", length = 20)
+    private String soDienThoai;
+
+    // Địa chỉ
+    @Column(name = "dia_chi", length = 500)
+    private String diaChi;
+
+    // URL hoặc đường dẫn ảnh đại diện
+    @Column(name = "anh_dai_dien", length = 500)
+    private String anhDaiDien;
+
+    // Loại tài khoản (SINH_VIEN, CAN_BO_LOP, CAN_BO_PHONG_BAN)
+    @Enumerated(EnumType.STRING)
+    @Column(name = "loai_tai_khoan", nullable = false)
+    private LoaiNguoiDung loaiTaiKhoan;
+
+    // Trạng thái tài khoản (true: active, false: inactive), mặc định là true
+    @Builder.Default
+    @Column(name = "trang_thai", nullable = false, columnDefinition = "BOOLEAN DEFAULT true")
+    private boolean trangThai = true;
+
+    // Thời gian tạo, tự động gán khi tạo mới
+    @CreationTimestamp
+    @Column(name = "ngay_tao", nullable = false, updatable = false)
+    private Timestamp ngayTao;
+
+    // Thời gian cập nhật, tự động gán khi cập nhật
+    @UpdateTimestamp
+    @Column(name = "ngay_cap_nhat", nullable = false)
+    private Timestamp ngayCapNhat;
+
+}
+
+/* ===== java/com/hau/websocket/entity/Nhom.java ===== */
+// --- Nhom.java ---
+package com.hau.websocket.entity;
+
+import jakarta.persistence.*;
+import lombok.*;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
+
+import java.sql.Timestamp;
+import java.util.Set;
+
+/**
+ * Entity đại diện cho Nhóm (có thể là nhóm tùy chỉnh hoặc nhóm lớp học).
+ * Có mối quan hệ ManyToOne với NguoiDung (người tạo) và OneToMany với ThanhVienNhom, TinNhanNhom.
+ */
+@Setter
+@Getter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+@Entity
+@Table(name = "nhom")
+public class Nhom {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Integer id;
+
+    // Tên nhóm, không null
+    @Column(name = "ten_nhom", nullable = false, length = 255)
+    private String tenNhom;
+
+    // Mô tả về nhóm
+    @Column(name = "mo_ta", columnDefinition = "TEXT")
+    private String moTa;
+
+    // URL hoặc đường dẫn ảnh đại diện của nhóm
+    @Column(name = "anh_dai_dien_nhom", length = 500)
+    private String anhDaiDienNhom;
+
+    @JoinColumn(name = "nguoi_tao_id", nullable = false)
+    private Integer nguoiTaoId;
+
+    // Loại nhóm (ví dụ: CLB, DuAn, HocTap, TuyChinh), mặc định là "TuyChinh"
+    @Builder.Default
+    @Column(name = "loai_nhom", length = 50, columnDefinition = "VARCHAR(50) DEFAULT 'TuyChinh'")
+    private String loaiNhom = "TuyChinh";
+
+    // Thời gian tạo, tự động gán khi tạo mới
+    @CreationTimestamp
+    @Column(name = "ngay_tao", nullable = false, updatable = false)
+    private Timestamp ngayTao;
+
+    // Thời gian cập nhật, tự động gán khi cập nhật
+    @UpdateTimestamp
+    @Column(name = "ngay_cap_nhat", nullable = false)
+    private Timestamp ngayCapNhat;
+}
+
+/* ===== java/com/hau/websocket/entity/NhomThanhVien.java ===== */
+// --- NhomThanhVien.java ---
+package com.hau.websocket.entity;
+
+import jakarta.persistence.*;
+import lombok.*;
+import org.hibernate.annotations.CreationTimestamp;
+
+import java.sql.Timestamp;
+
+/**
+ * Entity đại diện cho mối quan hệ thành viên trong nhóm (bảng trung gian).
+ * Sử dụng khóa chính tự tăng đơn giản thay vì khóa phức hợp.
+ * Lưu ý: Tên lớp này có thể không nhất quán với tên bảng "thanh_vien_nhom".
+ * Xem xét đổi tên lớp thành ThanhVienNhom cho đồng bộ.
+ */
+@Setter
+@Getter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+@Entity
+@Table(name = "thanh_vien_nhom") // Ánh xạ tới bảng thanh_vien_nhom
+public class NhomThanhVien { // Tên lớp giữ nguyên theo file gốc, nhưng nên đổi thành ThanhVienNhom
+
+    // Khóa chính tự tăng đơn giản
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Integer id;
+
+
+    @JoinColumn(name = "nhom_id", nullable = false)
+    private Integer nhomId;
+
+    @JoinColumn(name = "nguoi_dung_id", nullable = false)
+    private Integer nguoiDungId;
+
+    // Vai trò của thành viên trong nhóm (ví dụ: ThanhVien, QuanTriVien)
+    @Column(name = "vai_tro_trong_nhom", length = 50, columnDefinition = "VARCHAR(50) DEFAULT 'ThanhVien'")
+    private String vaiTroTrongNhom = "ThanhVien";
+
+    // Thời gian tham gia, tự động gán khi tạo mới
+    @CreationTimestamp
+    @Column(name = "ngay_tham_gia", nullable = false, updatable = false)
+    private Timestamp ngayThamGia;
+}
+
+/* ===== java/com/hau/websocket/entity/PhongBan.java ===== */
+// --- PhongBan.java ---
+package com.hau.websocket.entity;
+
+import jakarta.persistence.*;
+import lombok.*;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
+
+import java.sql.Timestamp;
+import java.util.Set;
+
+/**
+ * Entity đại diện cho Phòng ban.
+ * Có mối quan hệ OneToMany với CanBoPhongBan.
+ */
+@Builder
+@Setter
+@Getter
+@NoArgsConstructor
+@AllArgsConstructor
+@Entity
+@Table(name = "phong_ban")
+public class PhongBan {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Integer id;
+
+    // Mã phòng ban, là duy nhất và không null
+    @Column(name = "ma_phong_ban", unique = true, nullable = false, length = 50)
+    private String maPhongBan;
+
+    // Tên phòng ban, không null
+    @Column(name = "ten_phong_ban", nullable = false, length = 255)
+    private String tenPhongBan;
+
+    // Mô tả về phòng ban
+    @Column(name = "mo_ta", columnDefinition = "TEXT")
+    private String moTa;
+
+    // Email liên hệ của phòng ban
+    @Column(name = "email_lien_he", length = 255)
+    private String emailLienHe;
+
+    // Số điện thoại liên hệ của phòng ban
+    @Column(name = "so_dien_thoai_lien_he", length = 20)
+    private String soDienThoaiLienHe;
+
+    // Thời gian tạo, tự động gán khi tạo mới
+    @CreationTimestamp
+    @Column(name = "ngay_tao", nullable = false, updatable = false)
+    private Timestamp ngayTao;
+
+    // Thời gian cập nhật, tự động gán khi cập nhật
+    @UpdateTimestamp
+    @Column(name = "ngay_cap_nhat", nullable = false)
+    private Timestamp ngayCapNhat;
+}
+
+/* ===== java/com/hau/websocket/entity/SinhVien.java ===== */
+
+// --- SinhVien.java ---
+package com.hau.websocket.entity;
+
+import jakarta.persistence.*;
+import lombok.*;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
+
+import java.sql.Timestamp;
+
+/**
+ * Entity đại diện cho Sinh viên.
+ * Liên kết OneToOne với NguoiDung và ManyToOne với LopHoc.
+ */
+@Builder
+@Setter
+@Getter
+@NoArgsConstructor
+@AllArgsConstructor
+@Entity
+@Table(name = "sinh_vien")
+public class SinhVien {
+
+    // Khóa chính tự tăng đơn giản
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Integer id;
+
+
+    @JoinColumn(name = "nguoi_dung_id", unique = true, nullable = false)
+    private Integer nguoiDungId;
+
+    // Mã sinh viên, là duy nhất và không null
+    @Column(name = "ma_sinh_vien", unique = true, nullable = false, length = 50)
+    private String maSinhVien;
+
+    @JoinColumn(name = "lop_hoc_id", nullable = false)
+    private Integer lopHocId;
+
+    // Thời gian tạo, tự động gán khi tạo mới
+    @CreationTimestamp
+    @Column(name = "ngay_tao", nullable = false, updatable = false)
+    private Timestamp ngayTao;
+
+    // Thời gian cập nhật, tự động gán khi cập nhật
+    @UpdateTimestamp
+    @Column(name = "ngay_cap_nhat", nullable = false)
+    private Timestamp ngayCapNhat;
+}
+
+/* ===== java/com/hau/websocket/entity/ThanhVienNhom.java ===== */
+// --- ThanhVienNhom.java ---
+package com.hau.websocket.entity;
+
+import jakarta.persistence.*;
+import lombok.*;
+import org.hibernate.annotations.CreationTimestamp;
+
+import java.sql.Timestamp;
+
+/**
+ * Entity đại diện cho mối quan hệ thành viên trong nhóm (bảng trung gian).
+ * Sử dụng khóa chính tự tăng đơn giản.
+ * Đây là entity chính xác hơn cho bảng "thanh_vien_nhom".
+ */
+@Setter
+@Getter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+@Entity
+@Table(name = "thanh_vien_nhom")
+public class ThanhVienNhom {
+
+    // Khóa chính tự tăng đơn giản
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Integer id;
+
+
+    @JoinColumn(name = "nhom_id", nullable = false)
+    private Integer nhomId;
+
+
+    @JoinColumn(name = "nguoi_dung_id", nullable = false)
+    private Integer nguoiDungId;
+
+    // Vai trò của thành viên trong nhóm (ví dụ: ThanhVien, QuanTriVien)
+    @Column(name = "vai_tro_trong_nhom", length = 50, columnDefinition = "VARCHAR(50) DEFAULT 'ThanhVien'")
+    private String vaiTroTrongNhom = "ThanhVien";
+
+    // Thời gian tham gia, tự động gán khi tạo mới
+    @CreationTimestamp
+    @Column(name = "ngay_tham_gia", nullable = false, updatable = false)
+    private Timestamp ngayThamGia;
+}
+
+/* ===== java/com/hau/websocket/entity/TinNhan.java ===== */
+// --- TinNhan.java ---
+package com.hau.websocket.entity;
+
+import jakarta.persistence.*;
+import lombok.*;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.SQLDelete;
+import org.hibernate.annotations.SQLRestriction;
+
+import java.sql.Timestamp;
+
+/**
+ * Entity đại diện cho Tin nhắn 1-1 giữa hai người dùng.
+ * Sử dụng cơ chế xóa mềm (soft delete).
+ */
+@Setter
+@Getter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+@Entity
+@Table(name = "tin_nhan")
+// Định nghĩa câu lệnh SQL để cập nhật cờ soft_deleted khi gọi delete()
+@SQLDelete(sql = "UPDATE tin_nhan SET soft_deleted = true WHERE id=?")
+// Luôn thêm điều kiện soft_deleted=false vào các câu lệnh SELECT
+@SQLRestriction("soft_deleted=false")
+public class TinNhan {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Integer id;
+
+    // ID định danh cuộc trò chuyện (ví dụ: user1Id_user2Id sắp xếp theo thứ tự)
+    @Column(name = "cuoc_tro_chuyen_id", nullable = false, length = 100)
+    private Integer cuocTroChuyenId;
+
+    // Liên kết nhiều-một với NguoiDung (người gửi)
+    @JoinColumn(name = "nguoi_gui_id", nullable = false)
+    private Integer nguoiGuiId;
+
+    // Liên kết nhiều-một với NguoiDung (người nhận)
+    @JoinColumn(name = "nguoi_nhan_id", nullable = false)
+    private Integer nguoiNhanId;
+
+    // Nội dung tin nhắn dạng text
+    @Column(name = "noi_dung", columnDefinition = "TEXT")
+    private String noiDung;
+
+    // URL của tệp đính kèm (nếu có)
+    @Column(name = "dinh_kem_url", length = 500)
+    private String dinhKemUrl;
+
+    // Tên gốc của tệp đính kèm
+    @Column(name = "dinh_kem_ten_goc", length = 255) // Đổi tên cột cho nhất quán
+    private String dinhKemTenGoc;
+
+    // Loại MIME của tệp đính kèm (ví dụ: image/jpeg, application/pdf)
+    @Column(name = "dinh_kem_loai", length = 100)
+    private String dinhKemLoai;
+
+    // Thời gian gửi, tự động gán khi tạo mới
+    @CreationTimestamp
+    @Column(name = "thoi_gian_gui", nullable = false, updatable = false)
+    private Timestamp thoiGianGui;
+
+    // Cờ xóa mềm, mặc định là false
+    @Builder.Default
+    @Column(name = "soft_deleted", columnDefinition = "BOOLEAN DEFAULT false")
+    private boolean softDeleted = false;
+}
+
+/* ===== java/com/hau/websocket/entity/TinNhanLop.java ===== */
+// --- TinNhanLop.java ---
+package com.hau.websocket.entity;
+
+import jakarta.persistence.*;
+import lombok.*;
+import org.hibernate.annotations.CreationTimestamp;
+
+import java.sql.Timestamp;
+
+/**
+ * Entity đại diện cho Tin nhắn trong một Lớp học.
+ */
+@Setter
+@Getter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+@Entity
+@Table(name = "tin_nhan_lop")
+public class TinNhanLop {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Integer id;
+
+
+    @JoinColumn(name = "lop_hoc_id", nullable = false)
+    private Integer lopHocId;
+
+
+    @JoinColumn(name = "nguoi_gui_id", nullable = false)
+    private Integer nguoiGuiId;
+
+    // Nội dung tin nhắn dạng text
+    @Column(name = "noi_dung", columnDefinition = "TEXT")
+    private String noiDung;
+
+    // URL của tệp đính kèm (nếu có)
+    @Column(name = "dinh_kem_url", length = 500)
+    private String dinhKemUrl;
+
+    // Tên gốc của tệp đính kèm
+    @Column(name = "dinh_kem_ten_goc", length = 255)
+    private String dinhKemTenGoc;
+
+    // Loại MIME của tệp đính kèm
+    @Column(name = "dinh_kem_loai", length = 100)
+    private String dinhKemLoai;
+
+    // Thời gian gửi, tự động gán khi tạo mới
+    @CreationTimestamp
+    @Column(name = "thoi_gian_gui", nullable = false, updatable = false)
+    private Timestamp thoiGianGui;
+}
+
+/* ===== java/com/hau/websocket/entity/TinNhanNhom.java ===== */
+// --- TinNhanNhom.java ---
+package com.hau.websocket.entity;
+
+import jakarta.persistence.*;
+import lombok.*;
+import org.hibernate.annotations.CreationTimestamp;
+
+import java.sql.Timestamp;
+
+/**
+ * Entity đại diện cho Tin nhắn trong một Nhóm tùy chỉnh.
+ */
+@Setter
+@Getter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+@Entity
+@Table(name = "tin_nhan_nhom") // Tên bảng đã được đổi
+public class TinNhanNhom { // Tên lớp đã được đổi
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Integer id;
+
+
+    @JoinColumn(name = "nhom_id", nullable = false) // Cột join đã được đổi
+    private Integer nhomId;
+
+
+    @JoinColumn(name = "nguoi_gui_id", nullable = false)
+    private Integer nguoiGuiId;
+
+    // Nội dung tin nhắn dạng text
+    @Column(name = "noi_dung", columnDefinition = "TEXT")
+    private String noiDung;
+
+    // URL của tệp đính kèm (nếu có)
+    @Column(name = "dinh_kem_url", length = 500)
+    private String dinhKemUrl;
+
+    // Tên gốc của tệp đính kèm
+    @Column(name = "dinh_kem_ten_goc", length = 255) // Tên cột đã được đổi
+    private String dinhKemTenGoc;
+
+    // Loại MIME của tệp đính kèm
+    @Column(name = "dinh_kem_loai", length = 100)
+    private String dinhKemLoai;
+
+    // Thời gian gửi, tự động gán khi tạo mới
+    @CreationTimestamp
+    @Column(name = "thoi_gian_gui", nullable = false, updatable = false)
+    private Timestamp thoiGianGui;
+}
+
+
+/* ===== java/com/hau/websocket/exception/AppException.java ===== */
+package com.hau.websocket.exception;
+
+import lombok.Getter;
+import lombok.Setter;
+import org.springframework.http.HttpStatus;
+
+import java.time.LocalDateTime;
+
+@Setter
+@Getter
+public class AppException extends RuntimeException {
+    private final HttpStatus httpStatus;
+    private final transient Object error;
+    private final LocalDateTime timestamp;
+
+    public AppException(HttpStatus httpStatus, String message, Object error) {
+        super(message);
+        this.httpStatus = httpStatus;
+        this.error = error;
+        this.timestamp = LocalDateTime.now();
+    }
+}
+
+
+/* ===== java/com/hau/websocket/exception/GlobalExceptionHandler.java ===== */
+package com.hau.websocket.exception;
+
+import com.hau.websocket.dto.response.ErrorsResponse;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+@RestControllerAdvice
+public class GlobalExceptionHandler {
+    // Xử lý ngoại lệ validation
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<ErrorsResponse> handleValidationExceptions(MethodArgumentNotValidException ex) {
+        List<Map<String, String>> errorDetails = new ArrayList<>();
+        ex.getBindingResult().getFieldErrors().forEach(error -> {
+            Map<String, String> detail = new HashMap<>();
+            detail.put("field", error.getField());
+            detail.put("message", error.getDefaultMessage());
+            errorDetails.add(detail);
+        });
+        ErrorsResponse errorResponse = new ErrorsResponse(
+                HttpStatus.BAD_REQUEST.value(), "Lỗi trường dữ liệu", errorDetails, LocalDateTime.now());
+        return new ResponseEntity<>(errorResponse, HttpStatus.BAD_REQUEST);
+    }
+
+    // Xử lý ngoại lệ DataIntegrityViolationException
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ErrorsResponse> handleDataIntegrityViolation(DataIntegrityViolationException ex) {
+        List<Map<String, String>> errorDetails = new ArrayList<>();
+        Map<String, String> detail = new HashMap<>();
+        detail.put("error", ex.getMessage());
+        errorDetails.add(detail);
+        ErrorsResponse errorResponse = new ErrorsResponse(
+                HttpStatus.BAD_REQUEST.value(),
+                "Vi phạm tính toàn vẹn dữ liệu. Xem 'error' để biết chi tiết.",
+                errorDetails,
+                LocalDateTime.now());
+        return new ResponseEntity<>(errorResponse, HttpStatus.BAD_REQUEST);
+    }
+
+    // Xử lý ngoại lệ tham số không đúng định dạng trong url
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ErrorsResponse> handleMethodArgumentTypeMismatch(MethodArgumentTypeMismatchException ex) {
+        String name = ex.getName();
+        ErrorsResponse errorResponse = new ErrorsResponse(
+                HttpStatus.BAD_REQUEST.value(), "Tham số " + name + " không đúng định dạng", null, LocalDateTime.now());
+        return new ResponseEntity<>(errorResponse, HttpStatus.BAD_REQUEST);
+    }
+
+    // Xử lý lỗi truyền sai định dạng tham số trong body request
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ErrorsResponse> handleHttpMessageNotReadableException() {
+        ErrorsResponse errorResponse = new ErrorsResponse(
+                HttpStatus.BAD_REQUEST.value(), "Dữ liệu request không đúng định dạng", null, LocalDateTime.now());
+        return new ResponseEntity<>(errorResponse, HttpStatus.BAD_REQUEST);
+    }
+
+    // Xử lý lỗi khi không tìm thấy tài nguyên
+    @ExceptionHandler(AppException.class)
+    public ResponseEntity<ErrorsResponse> handleAppException(AppException ex) {
+        ErrorsResponse errorResponse =
+                new ErrorsResponse(ex.getHttpStatus().value(), ex.getMessage(), ex.getError(), LocalDateTime.now());
+        return new ResponseEntity<>(errorResponse, ex.getHttpStatus()); // Trả về HttpStatus từ AppException
+    }
+
+    // Xử lý tất cả các ngoại lệ chưa được xác định
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<ErrorsResponse> handleAllExceptions(Exception e) {
+        ErrorsResponse errorResponse = new ErrorsResponse(
+                HttpStatus.INTERNAL_SERVER_ERROR.value(), "Đã có lỗi xảy ra(chưa xác định)", e, LocalDateTime.now());
+        return new ResponseEntity<>(errorResponse, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+}
+
+
+/* ===== java/com/hau/websocket/mapper/FileManagementMapper.java ===== */
+package com.hau.websocket.mapper;
+
+import com.hau.websocket.dto.response.FileInfo;
+import com.hau.websocket.entity.FileManagement;
+import org.mapstruct.Mapper;
+import org.mapstruct.Mapping;
+
+@Mapper(componentModel = "spring")
+public interface FileManagementMapper {
+    @Mapping(target = "id", source = "fileName")
+    FileManagement toFileManagement(FileInfo fileInfo);
+
+}
+
+
+/* ===== java/com/hau/websocket/mapper/NguoiDungMapper.java ===== */
+package com.hau.websocket.mapper;
+
+import com.hau.websocket.dto.request.NguoiDungCreateRequest;
+import com.hau.websocket.dto.request.NguoiDungUpdateRequest;
+import com.hau.websocket.dto.response.NguoiDungResponse;
+import com.hau.websocket.entity.NguoiDung;
+import org.mapstruct.Mapper;
+import org.mapstruct.MappingTarget;
+
+@Mapper(componentModel = "spring")
+public interface NguoiDungMapper {
+    NguoiDung toNguoiDung(NguoiDungCreateRequest nguoiDungCreateRequest);
+
+    void toNguoiDungUpdateRequest(@MappingTarget NguoiDung nguoiDung, NguoiDungUpdateRequest nguoiDungUpdateRequest);
+
+    NguoiDungResponse toNguoiDungResponse(NguoiDung nguoiDung);
+}
+
+
+/* ===== java/com/hau/websocket/mapper/TinNhanMapper.java ===== */
+package com.hau.websocket.mapper;
+
+import com.hau.websocket.dto.request.TinNhanCreateRequest;
+import com.hau.websocket.dto.response.TinNhanResponse;
+import com.hau.websocket.entity.TinNhan;
+import org.mapstruct.Mapper;
+
+@Mapper(componentModel = "spring")
+public interface TinNhanMapper {
+    TinNhan toTinNhan(TinNhanCreateRequest tinNhanCreateRequest);
+
+    TinNhanResponse toTinNhanResponse(TinNhan tinNhan);
+}
+
+
+/* ===== java/com/hau/websocket/repository/FileManagementRepository.java ===== */
+package com.hau.websocket.repository;
+
+import com.hau.websocket.entity.FileManagement;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+@Repository
+public interface FileManagementRepository extends JpaRepository<FileManagement, String> {
+
+}
+
+
+/* ===== java/com/hau/websocket/repository/FileRepository.java ===== */
+package com.hau.websocket.repository;
+
+import com.hau.websocket.dto.response.FileInfo;
+import com.hau.websocket.entity.FileManagement;
+import com.hau.websocket.exception.AppException;
+import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.core.io.Resource;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.stereotype.Repository;
+import org.springframework.util.DigestUtils;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
+import java.util.UUID;
+
+@Repository
+@RequiredArgsConstructor
+public class FileRepository {
+    @Value("${app.file.storage-dir}")
+    private String storageDir;
+    private final FileManagementRepository fileManagementRepository;
+    public FileInfo uploadFile(MultipartFile file) throws IOException {
+        Path path = Paths.get(storageDir);
+        String originalFileName = file.getOriginalFilename();
+        String fileName = UUID.randomUUID() + "_" + file.getOriginalFilename();
+
+        Path filePath = path.resolve(fileName).normalize().toAbsolutePath();
+        Files.copy(file.getInputStream(), filePath, StandardCopyOption.REPLACE_EXISTING);
+        String contentType = file.getContentType();
+        if (originalFileName != null && originalFileName.toLowerCase().endsWith(".jfif")) {
+            // Ghi đè Content-Type thành image/jpeg chỉ cho file .jfif
+            contentType = MediaType.IMAGE_JPEG_VALUE;
+        }
+        return FileInfo.builder()
+                .fileName(fileName)
+                .size(file.getSize())
+                .contentType(contentType)
+                .md5Checksum(DigestUtils.md5DigestAsHex(file.getInputStream()))
+                .filePath(filePath.toString())
+                .fileUrl(fileName)
+                .build();
+    }
+
+    public Resource read(FileManagement fileManagement) throws IOException {
+        var data = Files.readAllBytes(Path.of(fileManagement.getFilePath()));
+        return new ByteArrayResource(data);
+    }
+
+    public void delete(String filename) throws IOException {
+        Path filePath = Path.of(storageDir, filename);
+        boolean isDeleted = Files.deleteIfExists(filePath);
+        if(!isDeleted) {
+            throw new AppException(HttpStatus.NOT_FOUND, "Xóa thất bại", filePath);
+        }
+        fileManagementRepository.deleteById(filename);
+
+    }
+}
+
+
+/* ===== java/com/hau/websocket/repository/InvalidatedTokenRepository.java ===== */
+package com.hau.websocket.repository;
+
+import com.hau.websocket.entity.InvalidatedToken;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import java.util.Date;
+import java.util.List;
+
+public interface InvalidatedTokenRepository extends JpaRepository<InvalidatedToken, String> {
+    List<InvalidatedToken> findByExpiryDateLessThanEqual(Date expiryDate);
+}
+
+
+/* ===== java/com/hau/websocket/repository/NguoiDungRepository.java ===== */
+package com.hau.websocket.repository;
+
+import com.hau.websocket.entity.NguoiDung;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+import java.util.Optional;
+
+@Repository
+public interface NguoiDungRepository extends JpaRepository<NguoiDung, Integer> {
+    Optional<NguoiDung> findByMaDangNhap(String maDangNhap);
+}
+
+
+/* ===== java/com/hau/websocket/repository/TinNhanRepository.java ===== */
+package com.hau.websocket.repository;
+
+import com.hau.websocket.entity.TinNhan;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
+
+@Repository
+public interface TinNhanRepository extends JpaRepository<TinNhan, Integer> {
+    Page<TinNhan> findTinNhanByCuocTroChuyenId(Pageable pageable, Integer maCuocTroChuyenId);
+
+    @Transactional
+    void deleteByCuocTroChuyenId(Integer cuocTroChuyenId);
+}
+
+
+/* ===== java/com/hau/websocket/service/AuthenticationService.java ===== */
+package com.hau.websocket.service;
+
+import com.hau.websocket.dto.request.AuthenticationRequest;
+import com.hau.websocket.dto.request.IntrospectRequest;
+import com.hau.websocket.dto.request.LogoutRequest;
+import com.hau.websocket.dto.response.ApiResponse;
+import com.hau.websocket.dto.response.AuthenticationResponse;
+import com.hau.websocket.dto.response.IntrospectResponse;
+import com.hau.websocket.entity.InvalidatedToken;
+import com.hau.websocket.entity.NguoiDung;
+import com.hau.websocket.exception.AppException;
+import com.hau.websocket.repository.InvalidatedTokenRepository;
+import com.hau.websocket.repository.NguoiDungRepository;
+import com.nimbusds.jose.JOSEException;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+
+import java.text.ParseException;
+import java.time.LocalDateTime;
+import java.util.Date;
+
+@RequiredArgsConstructor
+@Service
+@Slf4j
+public class AuthenticationService {
+    private final NguoiDungRepository userRepository;
+    private final InvalidatedTokenRepository invalidatedTokenRepository;
+    private final PasswordEncoder passwordEncoder;
+    private final TokenService tokenService;
+
+
+    public ApiResponse<AuthenticationResponse> authenticate(AuthenticationRequest authenticationRequest) {
+        NguoiDung nguoiDung = userRepository
+                .findByMaDangNhap(authenticationRequest.getMaDangNhap())
+                .orElse(null);
+
+        if (nguoiDung == null || !passwordEncoder.matches(authenticationRequest.getMatKhau(), nguoiDung.getMatKhau())) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "Tên đăng nhập hoặc mật khẩu không chính xác", null);
+        }
+
+        String token;
+        try {
+            token = tokenService.generateToken(nguoiDung);
+        } catch (JOSEException e) {
+            throw new AppException(HttpStatus.INTERNAL_SERVER_ERROR, "Lỗi tạo token", e);
+        }
+
+        return ApiResponse.<AuthenticationResponse>builder()
+                .status(HttpStatus.OK.value())
+                .message("Đăng nhập thành công")
+                .result(AuthenticationResponse.builder()
+                        .authenticated(true)
+                        .token(token)
+                        .build())
+                .timestamp(LocalDateTime.now())
+                .build();
+    }
+
+    public ApiResponse<Void> logout(LogoutRequest logoutRequest) throws ParseException {
+        var signToken = tokenService.verifyToken(logoutRequest.getToken(), true);
+        String jit = signToken.getJWTClaimsSet().getJWTID();
+        Date expiryTime = signToken.getJWTClaimsSet().getExpirationTime();
+
+        InvalidatedToken invalidatedToken =
+                InvalidatedToken.builder().id(jit).expiryDate(expiryTime).build();
+        invalidatedTokenRepository.save(invalidatedToken);
+        return ApiResponse.<Void>builder()
+                .status(HttpStatus.OK.value())
+                .message("Đăng xuất thành công")
+                .result(null)
+                .timestamp(LocalDateTime.now())
+                .build();
+    }
+
+    public ApiResponse<IntrospectResponse> introspect(IntrospectRequest introspectRequest) {
+        String token = introspectRequest.getToken();
+
+        if (token == null || token.isEmpty()) {
+            return buildErrorResponse("Token không được cung cấp");
+        }
+
+        try {
+            // Sử dụng TokenService thay vì logic tại chỗ
+            IntrospectResponse result = tokenService.validateToken(token);
+
+            if (result.isValid()) {
+                return ApiResponse.<IntrospectResponse>builder()
+                        .status(HttpStatus.OK.value())
+                        .message("Token hợp lệ")
+                        .result(result)
+                        .timestamp(LocalDateTime.now())
+                        .build();
+            } else {
+                return buildErrorResponse("Token không hợp lệ");
+            }
+        } catch (Exception e) {
+            return buildErrorResponse(e.getMessage());
+        }
+    }
+
+    private ApiResponse<IntrospectResponse> buildErrorResponse(String message) {
+        return ApiResponse.<IntrospectResponse>builder()
+                .status(HttpStatus.BAD_REQUEST.value())
+                .message(message)
+                .result(IntrospectResponse.builder().valid(false).build())
+                .timestamp(LocalDateTime.now())
+                .build();
+    }
+}
+
+
+/* ===== java/com/hau/websocket/service/FileService.java ===== */
+package com.hau.websocket.service;
+
+import com.hau.websocket.dto.FileData;
+import com.hau.websocket.dto.response.FileResponse;
+import com.hau.websocket.entity.FileManagement;
+import com.hau.websocket.exception.AppException;
+import com.hau.websocket.mapper.FileManagementMapper;
+import com.hau.websocket.repository.FileManagementRepository;
+import com.hau.websocket.repository.FileRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.IOException;
+import java.time.LocalDateTime;
+
+@Service
+@Slf4j
+@RequiredArgsConstructor
+public class FileService {
+    private final FileRepository fileRepository;
+    private final FileManagementRepository fileManagementRepository;
+    private final FileManagementMapper fileManagementMapper;
+
+    public FileResponse uploadFile(MultipartFile file) throws IOException {
+        var fileInfo = fileRepository.uploadFile(file);
+        var fileManagement = fileManagementMapper.toFileManagement(fileInfo);
+        String userId = SecurityContextHolder.getContext().getAuthentication().getName();
+        fileManagement.setOwnerId(userId);
+        fileManagement.setCreatedAt(LocalDateTime.now());
+        fileManagementRepository.save(fileManagement);
+        return (FileResponse.builder()
+                .originalFileName(file.getOriginalFilename())
+                .url(fileInfo.getFileUrl())
+                .contentType(fileInfo.getContentType())
+                .build());
+    }
+
+    public FileData downloadFile(String fileName) throws IOException {
+        var fileManagement = fileManagementRepository.findById(fileName).orElseThrow(
+                () -> new AppException(HttpStatus.NOT_FOUND, "File không tồn tại", null)
+        );
+
+        return new FileData(fileManagement.getContentType(), fileRepository.read(fileManagement));
+    }
+
+    public void deleteFile(String fileName) throws IOException {
+        fileRepository.delete(fileName);
+    }
+
+    public FileManagement getFileManagement(String fileName) {
+        return fileManagementRepository.findById(fileName)
+                .orElseThrow(() -> new AppException(HttpStatus.NOT_FOUND, "File không tồn tại", null));
+    }
+}
+
+
+/* ===== java/com/hau/websocket/service/NguoiDungService.java ===== */
+package com.hau.websocket.service;
+
+import com.hau.websocket.dto.request.ChangePasswordRequest;
+import com.hau.websocket.dto.request.NguoiDungCreateRequest;
+import com.hau.websocket.dto.request.NguoiDungUpdateRequest;
+import com.hau.websocket.dto.response.ApiResponse;
+import com.hau.websocket.dto.response.NguoiDungResponse;
+import com.hau.websocket.dto.response.PageResponse;
+import com.hau.websocket.entity.NguoiDung;
+import com.hau.websocket.exception.AppException;
+import com.hau.websocket.mapper.NguoiDungMapper;
+import com.hau.websocket.repository.NguoiDungRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.http.HttpStatus;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.IOException;
+import java.time.LocalDateTime;
+import java.util.List;
+
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class NguoiDungService {
+    private final NguoiDungRepository nguoiDungRepository;
+    private final NguoiDungMapper nguoiDungMapper;
+    private final PasswordEncoder passwordEncoder;
+    private final FileService fileService;
+
+    @Value("${app.file.download-prefix}")
+    private String fileDownloadPrefix;
+
+    public ApiResponse<NguoiDungResponse> createUser(NguoiDungCreateRequest nguoiDungCreateRequest) {
+        NguoiDung nguoiDung = nguoiDungMapper.toNguoiDung(nguoiDungCreateRequest);
+        nguoiDung.setMatKhau(passwordEncoder.encode(nguoiDungCreateRequest.getMatKhau()));
+        try {
+            nguoiDungRepository.save(nguoiDung);
+
+            return ApiResponse.<NguoiDungResponse>builder()
+                    .status(HttpStatus.CREATED.value())
+                    .message("Tạo người dùng thành công")
+                    .result(null)
+                    .timestamp(LocalDateTime.now())
+                    .build();
+        } catch (DataIntegrityViolationException ex) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "Tài khoản đã tồn tại", null);
+        }
+    }
+
+    public ApiResponse<PageResponse<NguoiDungResponse>> getAllUsers(int page, int size) {
+        Sort sort = Sort.by("ngayTao").descending();
+
+        Pageable pageable = PageRequest.of(page - 1, size, sort);
+        Page<NguoiDung> userPage = nguoiDungRepository.findAll(pageable);
+
+        List<NguoiDungResponse> userResponseList = userPage.map(nguoiDungMapper::toNguoiDungResponse).toList();
+        userResponseList.forEach(userResponse -> userResponse.setAnhDaiDien(fileDownloadPrefix + userResponse.getAnhDaiDien()));
+        return ApiResponse.<PageResponse<NguoiDungResponse>>builder()
+                .status(HttpStatus.OK.value())
+                .message("Lấy danh sách user thành công")
+                .result(PageResponse.<NguoiDungResponse>builder()
+                        .currentPage(page)
+                        .totalPages(userPage.getTotalPages())
+                        .totalElements(userPage.getTotalElements())
+                        .pageSize(userPage.getSize())
+                        .data(userResponseList)
+                        .build())
+                .timestamp(LocalDateTime.now())
+                .build();
+    }
+
+    public ApiResponse<NguoiDungResponse> myInfo() {
+        var context = SecurityContextHolder.getContext();
+        String id = context.getAuthentication().getName();
+
+        NguoiDung user = findUserById(Integer.valueOf(id));
+        NguoiDungResponse userResponse = nguoiDungMapper.toNguoiDungResponse(user);
+        userResponse.setAnhDaiDien(fileDownloadPrefix + user.getAnhDaiDien());
+        return ApiResponse.<NguoiDungResponse>builder()
+                .status(HttpStatus.OK.value())
+                .message("Lấy thông tin thành công")
+                .result(userResponse)
+                .timestamp(LocalDateTime.now())
+                .build();
+    }
+
+
+    public ApiResponse<NguoiDungResponse> updateUserProfileImage(MultipartFile profileImage) throws IOException {
+        if (profileImage == null || profileImage.isEmpty()) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "Vui lòng chọn ảnh để tải lên", null);
+        }
+        var authentication = SecurityContextHolder.getContext().getAuthentication();
+        NguoiDung user = findUserById(Integer.valueOf(authentication.getName()));
+
+        var fileResponse = fileService.uploadFile(profileImage);
+        user.setAnhDaiDien(fileResponse.getUrl());
+        nguoiDungRepository.save(user);
+        return ApiResponse.<NguoiDungResponse>builder()
+                .status(HttpStatus.OK.value())
+                .message("Cập nhật ảnh đại diện thành công")
+                .result(null)
+                .timestamp(LocalDateTime.now())
+                .build();
+    }
+
+    public ApiResponse<NguoiDungResponse> updateUser(Integer id, NguoiDungUpdateRequest userUpdateRequest) {
+        NguoiDung user = findUserById(id);
+        nguoiDungMapper.toNguoiDungUpdateRequest(user, userUpdateRequest);
+        user.setMatKhau(passwordEncoder.encode(userUpdateRequest.getMatKhau()));
+
+        nguoiDungRepository.save(user);
+        return ApiResponse.<NguoiDungResponse>builder()
+                .status(HttpStatus.OK.value())
+                .message("Cập nhật thông tin user thành công")
+                .result(null)
+                .timestamp(LocalDateTime.now())
+                .build();
+    }
+
+    public ApiResponse<NguoiDungResponse> changePassword(ChangePasswordRequest changePasswordRequest) {
+        var authentication = SecurityContextHolder.getContext().getAuthentication();
+        Integer id = Integer.valueOf(authentication.getName());
+        NguoiDung user = findUserById(id);
+        if (!passwordEncoder.matches(changePasswordRequest.getMatKhauCu(), user.getMatKhau())) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "Mật khẩu cũ không đúng", null);
+        }
+
+        user.setMatKhau(passwordEncoder.encode(changePasswordRequest.getMatKhauMoi()));
+        nguoiDungRepository.save(user);
+        return ApiResponse.<NguoiDungResponse>builder()
+                .status(HttpStatus.OK.value())
+                .message("Đổi mật khẩu thành công")
+                .result(null)
+                .timestamp(LocalDateTime.now())
+                .build();
+    }
+
+
+    public NguoiDung findUserById(Integer id) {
+        return nguoiDungRepository
+                .findById(id)
+                .orElseThrow(() -> new AppException(HttpStatus.NOT_FOUND, "Không tìm thấy người dùng có id: " + id, null));
+    }
+}
+
+
+/* ===== java/com/hau/websocket/service/TinNhanService.java ===== */
+package com.hau.websocket.service;
+
+import com.hau.websocket.dto.request.TinNhanCreateRequest;
+import com.hau.websocket.dto.response.ApiResponse;
+import com.hau.websocket.dto.response.PageResponse;
+import com.hau.websocket.dto.response.TinNhanResponse;
+import com.hau.websocket.entity.TinNhan;
+import com.hau.websocket.mapper.TinNhanMapper;
+import com.hau.websocket.repository.TinNhanRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.IOException;
+import java.time.LocalDateTime;
+import java.util.List;
+
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class TinNhanService {
+    private final TinNhanRepository tinNhanRepository;
+    private final TinNhanMapper tinNhanMapper;
+    private final FileService fileService;
+
+    @Value("${app.file.download-prefix}")
+    private String fileDownloadPrefix;
+
+    public void crateTinNhan(TinNhanCreateRequest tinNhanCreateRequest, MultipartFile multipartFile) throws IOException {
+        var authentication = SecurityContextHolder.getContext().getAuthentication();
+        Integer id = Integer.valueOf(authentication.getName());
+
+        TinNhan tinNhan = tinNhanMapper.toTinNhan(tinNhanCreateRequest);
+        tinNhan.setNguoiGuiId(id);
+        tinNhan.setCuocTroChuyenId(id + tinNhanCreateRequest.getNguoiNhanId());
+        var fileResponse = fileService.uploadFile(multipartFile);
+        tinNhan.setDinhKemUrl(fileResponse.getUrl());
+        tinNhan.setDinhKemTenGoc(fileResponse.getOriginalFileName());
+        tinNhan.setDinhKemLoai(fileResponse.getContentType());
+
+        tinNhanRepository.save(tinNhan);
+    }
+
+    public ApiResponse<PageResponse<TinNhanResponse>> getTinNhanByCuocTroChuyenId(int page, int size, Integer cuocTroChuyenId) {
+        Sort sort = Sort.by("thoiGianGui").descending();
+
+        Pageable pageable = PageRequest.of(page - 1, size, sort);
+        Page<TinNhan> tinNhans = tinNhanRepository.findTinNhanByCuocTroChuyenId(pageable, cuocTroChuyenId);
+
+        List<TinNhanResponse> tinNhanResponseList = tinNhans.map(tinNhanMapper::toTinNhanResponse).toList();
+        tinNhanResponseList.forEach(tinNhanResponse -> tinNhanResponse.setDinhKemUrl(fileDownloadPrefix + tinNhanResponse.getDinhKemUrl()));
+        return ApiResponse.<PageResponse<TinNhanResponse>>builder()
+                .status(200)
+                .message("Lấy thông tin thành công")
+                .result(
+                        PageResponse.<TinNhanResponse>builder()
+                                .currentPage(page)
+                                .totalPages(tinNhans.getTotalPages())
+                                .totalElements(tinNhans.getTotalElements())
+                                .pageSize(tinNhans.getSize())
+                                .data(tinNhanResponseList)
+                                .build()
+                )
+                .timestamp(LocalDateTime.now())
+                .build();
+    }
+
+    public void deleteAllTinNhan(Integer cuocTroChuyenId) {
+        tinNhanRepository.deleteByCuocTroChuyenId(cuocTroChuyenId);
+    }
+
+    public void deleteTinNhan(Integer id) {
+        TinNhan tinNhan = tinNhanRepository.findById(id).orElseThrow(() -> new RuntimeException("Tin nhan khong ton tai"));
+        tinNhanRepository.delete(tinNhan);
+    }
+
+}
+
+
+/* ===== java/com/hau/websocket/service/TokenService.java ===== */
+package com.hau.websocket.service;
+
+import com.hau.websocket.dto.request.RefreshTokenRequest;
+import com.hau.websocket.dto.response.ApiResponse;
+import com.hau.websocket.dto.response.AuthenticationResponse;
+import com.hau.websocket.dto.response.IntrospectResponse;
+import com.hau.websocket.entity.InvalidatedToken;
+import com.hau.websocket.entity.NguoiDung;
+import com.hau.websocket.exception.AppException;
+import com.hau.websocket.repository.InvalidatedTokenRepository;
+import com.hau.websocket.repository.NguoiDungRepository;
+import com.nimbusds.jose.*;
+import com.nimbusds.jose.crypto.MACSigner;
+import com.nimbusds.jose.crypto.MACVerifier;
+import com.nimbusds.jwt.JWTClaimsSet;
+import com.nimbusds.jwt.SignedJWT;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
+
+import java.text.ParseException;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
+import java.util.Date;
+import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
+
+@Service
+@Slf4j
+@RequiredArgsConstructor
+public class TokenService {
+
+    @Value("${jwt.signerKey}")
+    private String signerKey;
+
+    @Value("${jwt.issuer}")
+    private String issuer;
+
+    @Value("${jwt.expirationMinutes}")
+    private Long expiration;
+
+    @Value("${jwt.expirationRefreshMinutes}")
+    private Long expirationRefresh;
+
+    private final InvalidatedTokenRepository invalidatedTokenRepository;
+    private final NguoiDungRepository nguoiDungRepository;
+
+    private JWTClaimsSet validateTokenClaims(String token, boolean isRefresh) throws AppException {
+        try {
+            JWSVerifier verifier = new MACVerifier(signerKey.getBytes());
+            SignedJWT signedJWT = SignedJWT.parse(token);
+            JWTClaimsSet claimsSet = signedJWT.getJWTClaimsSet();
+
+            if (!signedJWT.verify(verifier)) {
+                throw new AppException(HttpStatus.BAD_REQUEST, "Chữ ký token không hợp lệ", null);
+            }
+
+            Date expirationTime = (isRefresh)
+                    ? new Date(claimsSet
+                    .getIssueTime()
+                    .toInstant()
+                    .plus(expirationRefresh, ChronoUnit.MINUTES)
+                    .toEpochMilli())
+                    : claimsSet.getExpirationTime();
+
+            if (expirationTime == null || expirationTime.before(new Date())) {
+                throw new AppException(HttpStatus.BAD_REQUEST, "Token đã hết hạn", null);
+            }
+
+            if (claimsSet.getIssuer() == null || !claimsSet.getIssuer().equals(issuer)) {
+                throw new AppException(HttpStatus.BAD_REQUEST, "Token issuer không hợp lệ", null);
+            }
+
+            if (claimsSet.getIssueTime() != null && claimsSet.getIssueTime().after(new Date())) {
+                throw new AppException(HttpStatus.BAD_REQUEST, "Token chưa có hiệu lực", null);
+            }
+
+            if (invalidatedTokenRepository.existsById(claimsSet.getJWTID())) {
+                throw new AppException(HttpStatus.BAD_REQUEST, "Token đã hết hiệu lực", null);
+            }
+
+            return claimsSet;
+
+        } catch (ParseException | JOSEException e) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "Token không hợp lệ", null);
+        }
+    }
+
+    public SignedJWT verifyToken(String token, boolean isRefresh) throws AppException {
+        try {
+            validateTokenClaims(token, isRefresh);
+            return SignedJWT.parse(token);
+        } catch (ParseException e) {
+            throw new AppException(HttpStatus.BAD_REQUEST, "Token không hợp lệ", null);
+        }
+    }
+
+    public IntrospectResponse validateToken(String token) {
+        if (token == null || token.isEmpty()) {
+            return IntrospectResponse.builder().valid(false).build(); // Use the builder directly
+        }
+        try {
+            JWTClaimsSet claimsSet = validateTokenClaims(token, false);
+            return IntrospectResponse.builder()
+                    .valid(true)
+                    .id(Integer.valueOf(claimsSet.getSubject()))
+                    .build();
+        } catch (AppException e) {
+            return IntrospectResponse.builder().valid(false).build(); // Consistent error handling
+        }
+    }
+
+    public String generateToken(NguoiDung nguoiDung) throws JOSEException {
+        JWSHeader jwsHeader = new JWSHeader(JWSAlgorithm.HS512);
+        JWTClaimsSet jwtClaimsSet = new JWTClaimsSet.Builder()
+                .issuer(issuer)
+                .subject(nguoiDung.getId().toString())
+                .claim("ma_dang_nhap", nguoiDung.getMaDangNhap())
+                .issueTime(new Date())
+                .expirationTime(new Date(
+                        Instant.now().plus(expiration, ChronoUnit.MINUTES).toEpochMilli()))
+//                .claim("scope", buildScope(nguoiDung))
+                .jwtID(UUID.randomUUID().toString())
+                .build();
+
+        Payload payload = new Payload(jwtClaimsSet.toJSONObject());
+        JWSObject jwsObject = new JWSObject(jwsHeader, payload);
+        jwsObject.sign(new MACSigner(signerKey.getBytes()));
+        return jwsObject.serialize();
+    }
+
+    public ApiResponse<AuthenticationResponse> refreshToken(RefreshTokenRequest refreshTokenRequest)
+            throws JOSEException, ParseException {
+        SignedJWT signedJWT = verifyToken(refreshTokenRequest.getToken(), true);
+
+        String jwtId = signedJWT.getJWTClaimsSet().getJWTID();
+        Date expiryTime = signedJWT.getJWTClaimsSet().getExpirationTime();
+
+        invalidatedTokenRepository.save(
+                InvalidatedToken.builder().id(jwtId).expiryDate(expiryTime).build());
+
+        Integer maNguoiDung = Integer.valueOf(signedJWT.getJWTClaimsSet().getSubject());
+        log.info("Refresh token for nguoiDung: {}", maNguoiDung);
+        NguoiDung nguoiDung = nguoiDungRepository
+                .findById(maNguoiDung)
+                .orElseThrow(() -> new AppException(HttpStatus.BAD_REQUEST, "Người dùng không tồn tại", null));
+
+        String token = generateToken(nguoiDung);
+        log.info("Refresh token: {}", token);
+
+        return ApiResponse.<AuthenticationResponse>builder()
+                .status(HttpStatus.OK.value())
+                .message("Làm mới token thành công")
+                .result(AuthenticationResponse.builder()
+                        .authenticated(true)
+                        .token(token)
+                        .build())
+                .timestamp(LocalDateTime.now())
+                .build();
+    }
+
+    @Scheduled(fixedRate = 1440, timeUnit = TimeUnit.MINUTES)
+    public void cleanupExpiredTokens() {
+        LocalDateTime now = LocalDateTime.now();
+        Date date = Date.from(now.atZone(ZoneId.systemDefault()).toInstant());
+        List<InvalidatedToken> expiredTokens = invalidatedTokenRepository.findByExpiryDateLessThanEqual(date);
+        invalidatedTokenRepository.deleteAll(expiredTokens);
+        log.info("Cleaned up {} expired tokens.", expiredTokens.size());
+    }
+}
+
+
+/* ===== java/com/hau/websocket/WebSocketApplication.java ===== */
+package com.hau.websocket;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+@SpringBootApplication
+public class WebSocketApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(WebSocketApplication.class, args);
+    }
+
+}

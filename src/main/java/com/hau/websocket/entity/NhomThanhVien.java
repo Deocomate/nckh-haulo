@@ -27,15 +27,12 @@ public class NhomThanhVien { // Tên lớp giữ nguyên theo file gốc, nhưng
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Integer id;
 
-    // Liên kết nhiều-một với Nhom
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "nhom_id", nullable = false)
-    private Nhom nhom;
 
-    // Liên kết nhiều-một với NguoiDung
-    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "nhom_id", nullable = false)
+    private Integer nhomId;
+
     @JoinColumn(name = "nguoi_dung_id", nullable = false)
-    private NguoiDung nguoiDung;
+    private Integer nguoiDungId;
 
     // Vai trò của thành viên trong nhóm (ví dụ: ThanhVien, QuanTriVien)
     @Column(name = "vai_tro_trong_nhom", length = 50, columnDefinition = "VARCHAR(50) DEFAULT 'ThanhVien'")

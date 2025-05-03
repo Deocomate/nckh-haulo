@@ -32,17 +32,15 @@ public class TinNhan {
 
     // ID định danh cuộc trò chuyện (ví dụ: user1Id_user2Id sắp xếp theo thứ tự)
     @Column(name = "cuoc_tro_chuyen_id", nullable = false, length = 100)
-    private String cuocTroChuyenId;
+    private Integer cuocTroChuyenId;
 
     // Liên kết nhiều-một với NguoiDung (người gửi)
-    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "nguoi_gui_id", nullable = false)
-    private NguoiDung nguoiGui;
+    private Integer nguoiGuiId;
 
     // Liên kết nhiều-một với NguoiDung (người nhận)
-    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "nguoi_nhan_id", nullable = false)
-    private NguoiDung nguoiNhan;
+    private Integer nguoiNhanId;
 
     // Nội dung tin nhắn dạng text
     @Column(name = "noi_dung", columnDefinition = "TEXT")

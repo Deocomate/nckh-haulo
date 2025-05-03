@@ -75,43 +75,4 @@ public class NguoiDung {
     @Column(name = "ngay_cap_nhat", nullable = false)
     private Timestamp ngayCapNhat;
 
-    // --- Relationships ---
-
-    // Liên kết một-một với SinhVien (nếu là sinh viên)
-    @OneToOne(mappedBy = "nguoiDung", cascade = CascadeType.ALL, fetch = FetchType.LAZY, optional = true)
-    private SinhVien sinhVien;
-
-    // Liên kết một-một với CanBoPhongBan (nếu là cán bộ phòng ban)
-    @OneToOne(mappedBy = "nguoiDung", cascade = CascadeType.ALL, fetch = FetchType.LAZY, optional = true)
-    private CanBoPhongBan canBoPhongBan;
-
-    // Danh sách các Nhóm do người dùng này tạo (OneToMany)
-    // Tên biến giữ nguyên vì đã đúng quy tắc
-    @OneToMany(mappedBy = "nguoiTao", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
-    private Set<Nhom> danhSachNhomTao;
-
-    // Danh sách các Nhóm mà người dùng này là thành viên (thông qua bảng ThanhVienNhom) (OneToMany)
-    // Tên biến giữ nguyên vì đã đúng quy tắc
-    @OneToMany(mappedBy = "nguoiDung", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
-    private Set<ThanhVienNhom> danhSachThanhVienNhom;
-
-    // Danh sách Tin nhắn 1-1 do người dùng này gửi (OneToMany)
-    // Đã đổi tên biến từ 'tinNhansGui' thành 'danhSachTinNhanGui'
-    @OneToMany(mappedBy = "nguoiGui", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
-    private Set<TinNhan> danhSachTinNhanGui;
-
-    // Danh sách Tin nhắn 1-1 mà người dùng này nhận (OneToMany)
-    // Đã đổi tên biến từ 'tinNhansNhan' thành 'danhSachTinNhanNhan'
-    @OneToMany(mappedBy = "nguoiNhan", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
-    private Set<TinNhan> danhSachTinNhanNhan;
-
-    // Danh sách Tin nhắn trong Nhóm tùy chỉnh do người dùng này gửi (OneToMany)
-    // Đã đổi tên biến từ 'tinNhanNhomsGui' thành 'danhSachTinNhanNhomGui'
-    @OneToMany(mappedBy = "nguoiGui", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
-    private Set<TinNhanNhom> danhSachTinNhanNhomGui;
-
-    // Danh sách Tin nhắn trong Lớp học do người dùng này gửi (OneToMany)
-    // Đã đổi tên biến từ 'tinNhanLopsGui' thành 'danhSachTinNhanLopGui'
-    @OneToMany(mappedBy = "nguoiGui", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
-    private Set<TinNhanLop> danhSachTinNhanLopGui;
 }

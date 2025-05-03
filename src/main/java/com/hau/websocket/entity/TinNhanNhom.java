@@ -23,15 +23,13 @@ public class TinNhanNhom { // Tên lớp đã được đổi
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Integer id;
 
-    // Liên kết nhiều-một với Nhom (tin nhắn thuộc về nhóm nào)
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "nhom_id", nullable = false) // Cột join đã được đổi
-    private Nhom nhom;
 
-    // Liên kết nhiều-một với NguoiDung (người gửi tin nhắn)
-    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "nhom_id", nullable = false) // Cột join đã được đổi
+    private Integer nhomId;
+
+
     @JoinColumn(name = "nguoi_gui_id", nullable = false)
-    private NguoiDung nguoiGui;
+    private Integer nguoiGuiId;
 
     // Nội dung tin nhắn dạng text
     @Column(name = "noi_dung", columnDefinition = "TEXT")

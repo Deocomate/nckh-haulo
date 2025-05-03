@@ -20,19 +20,17 @@ public class CanBoPhongBan {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Integer id;
 
-    // Liên kết một-một với NguoiDung (nguoi_dung_id là unique và không null)
-    @OneToOne(fetch = FetchType.LAZY)
+
     @JoinColumn(name = "nguoi_dung_id", unique = true, nullable = false)
-    private NguoiDung nguoiDung;
+    private Integer nguoiDungId;
 
     // Mã cán bộ, là duy nhất và không null
     @Column(name = "ma_can_bo", unique = true, nullable = false, length = 50)
     private String maCanBo;
 
-    // Liên kết nhiều-một với PhongBan (mỗi cán bộ thuộc về một phòng ban)
-    @ManyToOne(fetch = FetchType.LAZY)
+
     @JoinColumn(name = "phong_ban_id", nullable = false)
-    private PhongBan phongBan;
+    private Integer phongBanId;
 
     // Vai trò của nhân viên trong phòng ban
     @Column(name = "vai_tro_nhan_vien", length = 100)

@@ -38,10 +38,8 @@ public class Nhom {
     @Column(name = "anh_dai_dien_nhom", length = 500)
     private String anhDaiDienNhom;
 
-    // Liên kết nhiều-một với NguoiDung (người tạo nhóm)
-    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "nguoi_tao_id", nullable = false)
-    private NguoiDung nguoiTao;
+    private Integer nguoiTaoId;
 
     // Loại nhóm (ví dụ: CLB, DuAn, HocTap, TuyChinh), mặc định là "TuyChinh"
     @Builder.Default
@@ -57,14 +55,4 @@ public class Nhom {
     @UpdateTimestamp
     @Column(name = "ngay_cap_nhat", nullable = false)
     private Timestamp ngayCapNhat;
-
-    // Danh sách Thành viên thuộc Nhóm này (OneToMany)
-    // Đã đổi tên biến từ 'thanhVienNhoms' thành 'danhSachThanhVienNhom'
-    @OneToMany(mappedBy = "nhom", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
-    private Set<ThanhVienNhom> danhSachThanhVienNhom;
-
-    // Danh sách Tin nhắn thuộc Nhóm tùy chỉnh này (OneToMany)
-    // Đã đổi tên biến từ 'tinNhanNhoms' thành 'danhSachTinNhanNhom'
-    @OneToMany(mappedBy = "nhom", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
-    private Set<TinNhanNhom> danhSachTinNhanNhom;
 }

@@ -39,9 +39,8 @@ public class LopHoc {
     private String nienKhoa;
 
     // Liên kết nhiều-một với Nganh (mỗi lớp thuộc về một ngành)
-    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "nganh_id", nullable = false)
-    private Nganh nganh;
+    private Integer nganhId;
 
     // Thời gian tạo, tự động gán khi tạo mới
     @CreationTimestamp
@@ -52,14 +51,4 @@ public class LopHoc {
     @UpdateTimestamp
     @Column(name = "ngay_cap_nhat", nullable = false)
     private Timestamp ngayCapNhat;
-
-    // Danh sách Sinh viên thuộc Lớp học này (OneToMany)
-    // Đã đổi tên biến từ 'sinhViens' thành 'danhSachSinhVien'
-    @OneToMany(mappedBy = "lopHoc", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
-    private Set<SinhVien> danhSachSinhVien;
-
-    // Danh sách Tin nhắn thuộc Lớp học này (OneToMany)
-    // Đã đổi tên biến từ 'tinNhanLops' thành 'danhSachTinNhanLop'
-    @OneToMany(mappedBy = "lopHoc", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
-    private Set<TinNhanLop> danhSachTinNhanLop;
 }

@@ -5,10 +5,25 @@ spring:
   main:
     lazy-initialization: true
   datasource:
-    url: jdbc:mysql://localhost:3307/db_nckh_he_thong_lien_lac_sinh_vien
+    url: jdbc:mysql://localhost:3306/db_nckh_he_thong_lien_lac_sinh_vien
     username: root
-    password: 123456789
+    password: root
   jpa:
     hibernate:
       ddl-auto: update
     show-sql: true
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 5MB
+
+jwt:
+  signerKey: "hjfx9tzCV/l4DQA7c5Evcfan8oKqtZ2K/GtbJFaMhQqJxjWZmQ/qZp2F8+IspKfR"
+  expirationMinutes: 1440
+  expirationRefreshMinutes: 7200
+  issuer: websocket
+
+app:
+  file:
+    storage-dir: D:/Uploads
+    download-prefix: http://localhost:8080/file/download/

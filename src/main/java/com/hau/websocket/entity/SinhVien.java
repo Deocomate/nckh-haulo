@@ -27,19 +27,16 @@ public class SinhVien {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Integer id;
 
-    // Liên kết một-một với NguoiDung (nguoi_dung_id là unique và không null)
-    @OneToOne(fetch = FetchType.LAZY)
+
     @JoinColumn(name = "nguoi_dung_id", unique = true, nullable = false)
-    private NguoiDung nguoiDung;
+    private Integer nguoiDungId;
 
     // Mã sinh viên, là duy nhất và không null
     @Column(name = "ma_sinh_vien", unique = true, nullable = false, length = 50)
     private String maSinhVien;
 
-    // Liên kết nhiều-một với LopHoc (mỗi sinh viên thuộc về một lớp học)
-    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "lop_hoc_id", nullable = false)
-    private LopHoc lopHoc;
+    private Integer lopHocId;
 
     // Thời gian tạo, tự động gán khi tạo mới
     @CreationTimestamp

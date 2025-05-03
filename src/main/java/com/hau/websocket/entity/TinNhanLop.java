@@ -23,15 +23,13 @@ public class TinNhanLop {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Integer id;
 
-    // Liên kết nhiều-một với LopHoc (tin nhắn thuộc về lớp học nào)
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "lop_hoc_id", nullable = false)
-    private LopHoc lopHoc;
 
-    // Liên kết nhiều-một với NguoiDung (người gửi tin nhắn)
-    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "lop_hoc_id", nullable = false)
+    private Integer lopHocId;
+
+
     @JoinColumn(name = "nguoi_gui_id", nullable = false)
-    private NguoiDung nguoiGui;
+    private Integer nguoiGuiId;
 
     // Nội dung tin nhắn dạng text
     @Column(name = "noi_dung", columnDefinition = "TEXT")

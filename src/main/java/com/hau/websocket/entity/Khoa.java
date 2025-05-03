@@ -43,9 +43,4 @@ public class Khoa {
     @UpdateTimestamp
     @Column(name = "ngay_cap_nhat", nullable = false)
     private Timestamp ngayCapNhat;
-
-    // Danh sách các Ngành thuộc Khoa này (OneToMany)
-    // Đã đổi tên biến từ 'nganhs' thành 'danhSachNganh'
-    @OneToMany(mappedBy = "khoa", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
-    private Set<Nganh> danhSachNganh;
 }
