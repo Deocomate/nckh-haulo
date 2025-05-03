@@ -21,11 +21,12 @@ public class TinNhanLopController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public void createTinNhanLop(
+    public ResponseEntity<ApiResponse<TinNhanLopResponse>> createTinNhanLop(
             @RequestPart("tinNhan") TinNhanLopCreateRequest tinNhanLopCreateRequest,
             @RequestPart(value = "file", required = false) MultipartFile multipartFile
     ) throws IOException {
-        tinNhanLopService.createTinNhanLop(tinNhanLopCreateRequest, multipartFile);
+        ApiResponse<TinNhanLopResponse> apiResponse = tinNhanLopService.createTinNhanLop(tinNhanLopCreateRequest, multipartFile);
+        return new ResponseEntity<>(apiResponse, HttpStatus.CREATED);
     }
 
     @GetMapping("/{lopHocId}")
@@ -44,9 +45,4 @@ public class TinNhanLopController {
         tinNhanLopService.deleteTinNhanLop(tinNhanLopId);
     }
 
-    @DeleteMapping("/class/{lopHocId}")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void deleteAllTinNhanLopByLopHocId(@PathVariable Integer lopHocId) {
-        tinNhanLopService.deleteAllTinNhanLopByLopHocId(lopHocId);
-    }
 }

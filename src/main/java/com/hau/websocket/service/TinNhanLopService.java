@@ -35,7 +35,7 @@ public class TinNhanLopService {
     @Value("${app.file.download-prefix}")
     private String fileDownloadPrefix;
 
-    public void createTinNhanLop(TinNhanLopCreateRequest tinNhanLopCreateRequest, MultipartFile multipartFile) throws IOException {
+    public ApiResponse<TinNhanLopResponse> createTinNhanLop(TinNhanLopCreateRequest tinNhanLopCreateRequest, MultipartFile multipartFile) throws IOException {
         var authentication = SecurityContextHolder.getContext().getAuthentication();
         Integer nguoiGuiId = Integer.valueOf(authentication.getName());
 
@@ -49,6 +49,16 @@ public class TinNhanLopService {
         }
 
         tinNhanLopRepository.save(tinNhanLop);
+        TinNhanLopResponse tinNhanLopResponse = tinNhanLopMapper.toTinNhanLopResponse(tinNhanLop);
+        if (tinNhanLopResponse.getDinhKemUrl() != null && !tinNhanLopResponse.getDinhKemUrl().isEmpty()) {
+            tinNhanLopResponse.setDinhKemUrl(fileDownloadPrefix + tinNhanLopResponse.getDinhKemUrl());
+        }
+        return ApiResponse.<TinNhanLopResponse>builder()
+                .status(HttpStatus.OK.value())
+                .message("Đã gửi tin nhắn lớp học")
+                .result(tinNhanLopResponse)
+                .timestamp(LocalDateTime.now())
+                .build();
     }
 
     public ApiResponse<PageResponse<TinNhanLopResponse>> getTinNhanLopByLopHocId(int pageIndex, int pageSize, Integer lopHocId) {
@@ -85,9 +95,5 @@ public class TinNhanLopService {
             throw new AppException(HttpStatus.NOT_FOUND, "Tin nhắn lớp học không tồn tại", null);
         }
         tinNhanLopRepository.deleteById(id);
-    }
-
-    public void deleteAllTinNhanLopByLopHocId(Integer lopHocId) {
-        tinNhanLopRepository.deleteByLopHocId(lopHocId);
     }
 }

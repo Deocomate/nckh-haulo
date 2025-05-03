@@ -7,6 +7,7 @@ import com.hau.websocket.dto.response.TinNhanNhomResponse;
 import com.hau.websocket.entity.TinNhanNhom;
 import com.hau.websocket.exception.AppException;
 import com.hau.websocket.mapper.TinNhanNhomMapper;
+import com.hau.websocket.repository.ThanhVienNhomRepository;
 import com.hau.websocket.repository.TinNhanNhomRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -30,14 +31,19 @@ import java.util.List;
 public class TinNhanNhomService {
     private final TinNhanNhomRepository tinNhanNhomRepository;
     private final TinNhanNhomMapper tinNhanNhomMapper;
-    private final FileService fileService; // Assuming file service can handle files for any entity
+    private final FileService fileService;
+    private final ThanhVienNhomRepository thanhVienNhomRepository;
 
     @Value("${app.file.download-prefix}")
     private String fileDownloadPrefix;
 
-    public void createTinNhanNhom(TinNhanNhomCreateRequest tinNhanNhomCreateRequest, MultipartFile multipartFile) throws IOException {
+    public ApiResponse<TinNhanNhomResponse> createTinNhanNhom(TinNhanNhomCreateRequest tinNhanNhomCreateRequest, MultipartFile multipartFile) throws IOException {
         var authentication = SecurityContextHolder.getContext().getAuthentication();
         Integer nguoiGuiId = Integer.valueOf(authentication.getName());
+
+        if (thanhVienNhomRepository.findByMaThanhVienAndMaNhom(nguoiGuiId, tinNhanNhomCreateRequest.getNhomId() ).isEmpty()) {
+            throw new AppException(HttpStatus.FORBIDDEN, "Người dùng không phải là thành viên của nhóm này", null);
+        }
 
         TinNhanNhom tinNhanNhom = tinNhanNhomMapper.toTinNhanNhom(tinNhanNhomCreateRequest);
         tinNhanNhom.setNguoiGuiId(nguoiGuiId);
@@ -50,9 +56,25 @@ public class TinNhanNhomService {
         }
 
         tinNhanNhomRepository.save(tinNhanNhom);
+        TinNhanNhomResponse tinNhanNhomResponse = tinNhanNhomMapper.toTinNhanNhomResponse(tinNhanNhom);
+        if (tinNhanNhomResponse.getDinhKemUrl() != null && !tinNhanNhomResponse.getDinhKemUrl().isEmpty()) {
+            tinNhanNhomResponse.setDinhKemUrl(fileDownloadPrefix + tinNhanNhomResponse.getDinhKemUrl());
+        }
+        return ApiResponse.<TinNhanNhomResponse>builder()
+                .status(HttpStatus.OK.value())
+                .message("Đã gửi tin nhắn nhóm")
+                .result(tinNhanNhomResponse)
+                .timestamp(LocalDateTime.now())
+                .build();
     }
 
     public ApiResponse<PageResponse<TinNhanNhomResponse>> getTinNhanNhomByNhomId(int pageIndex, int pageSize, Integer nhomId) {
+        var authentication = SecurityContextHolder.getContext().getAuthentication();
+        Integer nguoiGuiId = Integer.valueOf(authentication.getName());
+
+        if (thanhVienNhomRepository.findByMaThanhVienAndMaNhom(nguoiGuiId, nhomId).isEmpty()) {
+            throw new AppException(HttpStatus.FORBIDDEN, "Người dùng không phải là thành viên của nhóm này", null);
+        }
         Sort sort = Sort.by("thoiGianGui").descending();
 
         Pageable pageable = PageRequest.of(pageIndex - 1, pageSize, sort);
@@ -86,10 +108,17 @@ public class TinNhanNhomService {
         if (!tinNhanNhomRepository.existsById(id)) {
             throw new AppException(HttpStatus.NOT_FOUND, "Tin nhắn nhóm không tồn tại", null);
         }
+        var authentication = SecurityContextHolder.getContext().getAuthentication();
+        Integer nguoiGuiId = Integer.valueOf(authentication.getName());
+
+        Integer nhomId = tinNhanNhomRepository.findById(id)
+                .orElseThrow(() -> new AppException(HttpStatus.NOT_FOUND, "Tin nhắn nhóm không tồn tại", null))
+                .getNhomId();
+
+        if (thanhVienNhomRepository.findByMaThanhVienAndMaNhom(nguoiGuiId, nhomId).isEmpty()) {
+            throw new AppException(HttpStatus.FORBIDDEN, "Người dùng không phải là thành viên của nhóm này", null);
+        }
         tinNhanNhomRepository.deleteById(id);
     }
 
-    public void deleteAllTinNhanNhomByNhomId(Integer nhomId) {
-        tinNhanNhomRepository.deleteByNhomId(nhomId);
-    }
 }

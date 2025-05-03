@@ -14,7 +14,7 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 public class TinNhanResponse {
     private Integer id;
-    private Integer cuocTroChuyenId;
+    private String cuocTroChuyenId;
     private Integer nguoiGuiId;
     private Integer nguoiNhanId;
     private String noiDung;

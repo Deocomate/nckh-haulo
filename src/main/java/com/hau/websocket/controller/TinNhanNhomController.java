@@ -21,11 +21,12 @@ public class TinNhanNhomController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public void createTinNhanNhom(
+    public ResponseEntity<ApiResponse<TinNhanNhomResponse>> createTinNhanNhom(
             @RequestPart("tinNhan") TinNhanNhomCreateRequest tinNhanNhomCreateRequest,
             @RequestPart(value = "file", required = false) MultipartFile multipartFile
     ) throws IOException {
-        tinNhanNhomService.createTinNhanNhom(tinNhanNhomCreateRequest, multipartFile);
+        ApiResponse<TinNhanNhomResponse> apiResponse = tinNhanNhomService.createTinNhanNhom(tinNhanNhomCreateRequest, multipartFile);
+        return new ResponseEntity<>(apiResponse, HttpStatus.CREATED);
     }
 
     @GetMapping("/{nhomId}")
@@ -42,11 +43,5 @@ public class TinNhanNhomController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deleteTinNhanNhom(@PathVariable Integer tinNhanNhomId) {
         tinNhanNhomService.deleteTinNhanNhom(tinNhanNhomId);
-    }
-
-    @DeleteMapping("/group/{nhomId}")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void deleteAllTinNhanNhomByNhomId(@PathVariable Integer nhomId) {
-        tinNhanNhomService.deleteAllTinNhanNhomByNhomId(nhomId);
     }
 }

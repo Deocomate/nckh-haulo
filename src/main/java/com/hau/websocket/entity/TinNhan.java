@@ -32,7 +32,7 @@ public class TinNhan {
 
     // ID định danh cuộc trò chuyện (ví dụ: user1Id_user2Id sắp xếp theo thứ tự)
     @Column(name = "cuoc_tro_chuyen_id", nullable = false, length = 100)
-    private Integer cuocTroChuyenId;
+    private String cuocTroChuyenId;
 
     // Liên kết nhiều-một với NguoiDung (người gửi)
     @JoinColumn(name = "nguoi_gui_id", nullable = false)

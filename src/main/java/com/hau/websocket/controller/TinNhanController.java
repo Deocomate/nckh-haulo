@@ -20,16 +20,17 @@ public class TinNhanController {
     private final TinNhanService tinNhanService;
 
     @PostMapping
-    public void createMessage(
+    public ResponseEntity<ApiResponse<TinNhanResponse>> createMessage(
             @RequestPart("tinNhan") TinNhanCreateRequest tinNhanCreateRequest,
             @RequestPart(value = "file", required = false) MultipartFile multipartFile
     ) throws IOException {
-        tinNhanService.crateTinNhan(tinNhanCreateRequest, multipartFile);
+        ApiResponse<TinNhanResponse> apiResponse = tinNhanService.crateTinNhan(tinNhanCreateRequest, multipartFile);
+        return new ResponseEntity<>(apiResponse, HttpStatus.CREATED);
     }
 
     @GetMapping("/{cuocTroChuyenId}")
     public ResponseEntity<ApiResponse<PageResponse<TinNhanResponse>>> getAllMessagesByCuocTroChuyenId(
-            @PathVariable Integer cuocTroChuyenId,
+            @PathVariable String cuocTroChuyenId,
             @RequestParam(required = false, defaultValue = "1") int pageIndex,
             @RequestParam(required = false, defaultValue = "10") int pageSize
     ) {
@@ -42,8 +43,4 @@ public class TinNhanController {
         tinNhanService.deleteTinNhan(tinNhanId);
     }
 
-    @DeleteMapping("/conversation/{cuocTroChuyenId}")
-    public void deleteMessagesByCuocTroChuyenId(@PathVariable Integer cuocTroChuyenId) {
-        tinNhanService.deleteAllTinNhan(cuocTroChuyenId);
-    }
 }

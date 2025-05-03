@@ -9,8 +9,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Repository
 public interface TinNhanRepository extends JpaRepository<TinNhan, Integer> {
-    Page<TinNhan> findTinNhanByCuocTroChuyenId(Pageable pageable, Integer maCuocTroChuyenId);
+    Page<TinNhan> findTinNhanByCuocTroChuyenId(Pageable pageable, String maCuocTroChuyenId);
 
     @Transactional
-    void deleteByCuocTroChuyenId(Integer cuocTroChuyenId);
+    void deleteByCuocTroChuyenId(String cuocTroChuyenId);
 }
