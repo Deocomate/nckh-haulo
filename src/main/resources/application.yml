@@ -1,0 +1,14 @@
+server:
+  port: 8080
+
+spring:
+  main:
+    lazy-initialization: true
+  datasource:
+    url: jdbc:mysql://localhost:3307/db_nckh_he_thong_lien_lac_sinh_vien
+    username: root
+    password: 123456789
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
