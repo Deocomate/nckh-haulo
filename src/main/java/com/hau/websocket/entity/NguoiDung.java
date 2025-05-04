@@ -11,7 +11,7 @@ import java.util.Set;
 
 /**
  * Entity đại diện cho Người dùng chung trong hệ thống.
- * Bao gồm thông tin cơ bản và các mối quan hệ với các vai trò cụ thể (SinhVien, CanBoPhongBan)
+ * Bao gồm thông tin cơ bản và các mối quan hệ với các vai trò cụ thể (SinhVienService, CanBoPhongBan)
  * và các hoạt động (tạo nhóm, tham gia nhóm, gửi/nhận tin nhắn).
  */
 @Setter

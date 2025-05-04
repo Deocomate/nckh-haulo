@@ -34,9 +34,10 @@ public class Nganh {
     @Column(name = "ten_nganh", nullable = false, length = 255)
     private String tenNganh;
 
-
+    // Modified to have a ManyToOne relationship with Khoa
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "khoa_id", nullable = false)
-    private Integer khoaId;
+    private Khoa khoa;
 
     // Thời gian tạo, tự động gán khi tạo mới
     @CreationTimestamp

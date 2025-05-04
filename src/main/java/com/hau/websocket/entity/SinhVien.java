@@ -1,5 +1,5 @@
 
-// --- SinhVien.java ---
+// --- SinhVienService.java ---
 package com.hau.websocket.entity;
 
 import jakarta.persistence.*;

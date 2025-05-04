@@ -11,7 +11,7 @@ import java.util.Set;
 
 /**
  * Entity đại diện cho Lớp học.
- * Có mối quan hệ ManyToOne với Nganh và OneToMany với SinhVien, TinNhanLop.
+ * Có mối quan hệ ManyToOne với Nganh và OneToMany với SinhVienService, TinNhanLop.
  */
 @Builder
 @Setter
@@ -39,8 +39,9 @@ public class LopHoc {
     private String nienKhoa;
 
     // Liên kết nhiều-một với Nganh (mỗi lớp thuộc về một ngành)
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "nganh_id", nullable = false)
-    private Integer nganhId;
+    private Nganh nganh;
 
     // Thời gian tạo, tự động gán khi tạo mới
     @CreationTimestamp

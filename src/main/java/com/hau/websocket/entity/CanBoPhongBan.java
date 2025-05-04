@@ -6,6 +6,7 @@ import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
 import java.sql.Timestamp;
+import java.util.Set;
 
 @Builder
 @Setter
@@ -20,17 +21,17 @@ public class CanBoPhongBan {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Integer id;
 
-
+    @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "nguoi_dung_id", unique = true, nullable = false)
-    private Integer nguoiDungId;
+    private NguoiDung nguoiDung;
 
     // Mã cán bộ, là duy nhất và không null
     @Column(name = "ma_can_bo", unique = true, nullable = false, length = 50)
     private String maCanBo;
 
-
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "phong_ban_id", nullable = false)
-    private Integer phongBanId;
+    private PhongBan phongBan;
 
     // Vai trò của nhân viên trong phòng ban
     @Column(name = "vai_tro_nhan_vien", length = 100)
@@ -49,4 +50,5 @@ public class CanBoPhongBan {
     @UpdateTimestamp
     @Column(name = "ngay_cap_nhat", nullable = false)
     private Timestamp ngayCapNhat;
+
 }
