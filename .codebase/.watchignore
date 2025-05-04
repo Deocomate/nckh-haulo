@@ -1,3 +1,15 @@
 # Add your custom ignore patterns here
 # Example: *.log
 # Example: temp/
+
+.codebase/
+.idea/
+.mvn/
+.vscode/
+target/
+.gitattributes
+.doc.txt
+HELP.md
+mvnw
+mvnw.cmd
+pom.xml
