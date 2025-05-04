@@ -41,7 +41,7 @@ public class TinNhanNhomService {
         var authentication = SecurityContextHolder.getContext().getAuthentication();
         Integer nguoiGuiId = Integer.valueOf(authentication.getName());
 
-        if (thanhVienNhomRepository.findByMaThanhVienAndMaNhom(nguoiGuiId, tinNhanNhomCreateRequest.getNhomId() ).isEmpty()) {
+        if (thanhVienNhomRepository.findThanhVienNhomByNhomIdAndNguoiDungId(nguoiGuiId, tinNhanNhomCreateRequest.getNhomId() ).isEmpty()) {
             throw new AppException(HttpStatus.FORBIDDEN, "Người dùng không phải là thành viên của nhóm này", null);
         }
 
@@ -72,7 +72,7 @@ public class TinNhanNhomService {
         var authentication = SecurityContextHolder.getContext().getAuthentication();
         Integer nguoiGuiId = Integer.valueOf(authentication.getName());
 
-        if (thanhVienNhomRepository.findByMaThanhVienAndMaNhom(nguoiGuiId, nhomId).isEmpty()) {
+        if (thanhVienNhomRepository.findThanhVienNhomByNhomIdAndNguoiDungId(nguoiGuiId, nhomId).isEmpty()) {
             throw new AppException(HttpStatus.FORBIDDEN, "Người dùng không phải là thành viên của nhóm này", null);
         }
         Sort sort = Sort.by("thoiGianGui").descending();
@@ -115,7 +115,7 @@ public class TinNhanNhomService {
                 .orElseThrow(() -> new AppException(HttpStatus.NOT_FOUND, "Tin nhắn nhóm không tồn tại", null))
                 .getNhomId();
 
-        if (thanhVienNhomRepository.findByMaThanhVienAndMaNhom(nguoiGuiId, nhomId).isEmpty()) {
+        if (thanhVienNhomRepository.findThanhVienNhomByNhomIdAndNguoiDungId(nguoiGuiId, nhomId).isEmpty()) {
             throw new AppException(HttpStatus.FORBIDDEN, "Người dùng không phải là thành viên của nhóm này", null);
         }
         tinNhanNhomRepository.deleteById(id);

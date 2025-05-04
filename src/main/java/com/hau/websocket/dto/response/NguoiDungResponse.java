@@ -14,12 +14,10 @@ import java.util.Set;
 @Builder
 public class NguoiDungResponse {
     private Integer id;
-    private String maDangNhap;
-    private String matKhau;
     private String hoTen;
     private String email;
     private String soDienThoai;
-    private LoaiNguoiDung loaiTaiKhoan;
     private String diaChi;
     private String anhDaiDien;
+
 }
